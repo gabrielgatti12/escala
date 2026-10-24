@@ -1,0 +1,22 @@
+services:
+  web:
+    build:
+      context: ..
+    env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - data:/data
+    restart: unless-stopped
+    init: true
+  sync:
+    build:
+      context: ..
+    env_file: .env
+    command: ["sh", "-c", "exec python manage.py sync_sheets $$SHEET_IDS --interval $${SYNC_INTERVAL:-300}"]
+    volumes:
+      - data:/data
+    restart: unless-stopped
+    init: true
+volumes:
+  data:

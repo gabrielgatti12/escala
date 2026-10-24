@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block content %}<section style="max-width:420px;margin:60px auto"><h1>Sua escala, organizada.</h1><p class="muted">Entre para consultar plantões e combinar trocas.</p><form method="post">{% csrf_token %}{{ form.as_p }}<button>Entrar</button></form><p class="muted">Solicite sua conta ao administrador da residência.</p></section>{% endblock %}

@@ -49,3 +49,56 @@
     });
   });
 })();
+
+// Check for new data without replacing an unsent comment or an open exchange.
+(() => {
+  'use strict';
+  const url = document.body.dataset.liveStatus;
+  if (!url) return;
+  let revision = document.body.dataset.liveRevision || null;
+  let pending = false;
+  let checking = false;
+  let lastInteraction = 0;
+  const dirty = new Set();
+  const banner = document.getElementById('live-update');
+  const button = document.getElementById('live-refresh');
+  document.addEventListener('input', event => {
+    if (event.target.form) dirty.add(event.target.form);
+  });
+  document.addEventListener('change', event => {
+    if (event.target.form) dirty.add(event.target.form);
+  });
+  document.addEventListener('submit', event => dirty.delete(event.target));
+  document.addEventListener('reset', event => dirty.delete(event.target));
+  document.addEventListener('pointerdown', () => { lastInteraction = Date.now(); }, {passive: true});
+  document.addEventListener('keydown', () => { lastInteraction = Date.now(); });
+  document.addEventListener('wheel', () => { lastInteraction = Date.now(); }, {passive: true});
+  document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('close', () => {
+    dialog.querySelectorAll('form').forEach(form => dirty.delete(form));
+  }));
+  function applyPending() {
+    if (!pending || document.hidden) return;
+    const busy = dirty.size > 0 || document.querySelector('dialog[open]') || document.activeElement.matches('input,textarea,select') || Date.now() - lastInteraction < 20000;
+    if (busy) { banner.hidden = false; return; }
+    window.location.reload();
+  }
+  button.addEventListener('click', () => window.location.reload());
+  async function check() {
+    if (document.hidden || checking) return;
+    checking = true;
+    try {
+      const response = await fetch(url, {credentials: 'same-origin', cache: 'no-store', headers: {'Accept': 'application/json'}});
+      if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) return;
+      const payload = await response.json();
+      if (typeof payload.revision !== 'string') return;
+      if (revision !== null && revision !== payload.revision) pending = true;
+      revision = payload.revision;
+      applyPending();
+    } catch (_) {
+      // A temporary network failure leaves the current screen and drafts intact.
+    } finally { checking = false; }
+  }
+  check();
+  setInterval(check, 45000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+})();

@@ -481,3 +481,23 @@ class WorkflowTests(TestCase):
         topic.refresh_from_db()
         self.assertTrue(topic.is_open)
         self.assertEqual(ExchangeTopic.objects.count(),1)
+    def test_live_status_requires_login_and_contains_no_schedule_content(self):
+        self.assertEqual(self.client.get('/dados/status/').status_code,302)
+        self.client.force_login(self.a)
+        response=self.client.get('/dados/status/')
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(set(response.json()),{'revision'})
+        self.assertEqual(len(response.json()['revision']),64)
+        self.assertNotIn('ana',response.content.decode())
+        self.assertEqual(response['Cache-Control'],'private, no-store')
+    def test_live_revision_changes_after_publication_comment_and_confirmation(self):
+        from .live import data_revision
+        from .services import set_exchange_interest,add_forum_comment
+        original=data_revision()
+        self.assertEqual(original,data_revision())
+        topic=set_exchange_interest(self.a,self.s1.pk,True)
+        published=data_revision();self.assertNotEqual(original,published)
+        add_forum_comment(self.b,topic.pk,'Posso trocar.')
+        commented=data_revision();self.assertNotEqual(published,commented)
+        respond_exchange(self.b,self.propose().pk,'accept')
+        self.assertNotEqual(commented,data_revision())

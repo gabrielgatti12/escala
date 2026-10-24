@@ -66,3 +66,11 @@ Em Planilhas e fontes, o administrador pode cadastrar uma semana pelo link Googl
 O mural mostra por padrão somente plantões futuros, ativos e ainda pertencentes ao autor. Publicações vencidas, retiradas ou com titularidade alterada não aceitam novos comentários. Uma nova publicação após mudança de titular cria uma conversa separada, preservando a anterior. A migração inclui intenções futuras que já estavam marcadas antes da introdução do mural. A autenticação e o vínculo do residente são usados no servidor para autoria e permissões; valores de autor enviados pelo navegador não são aceitos.
 
 O percurso publicar → comentar → propor → aceitar → atualizar calendários foi validado no navegador com duas contas fictícias, removidas após o teste. Não foram criadas publicações de teste nas escalas reais.
+
+## Atualização contínua
+
+O trabalhador faz um ciclo de descoberta das pastas configuradas e importação das fontes ativas; ao terminar, aguarda `SYNC_INTERVAL` (300 segundos por padrão) antes do próximo ciclo. A duração de cada importação se soma ao intervalo. Na primeira execução, a descoberta registra os arquivos Google Sheets das subpastas mensais; novas semanas entram no cadastro nos próximos ciclos. Cada fonte é importada em uma transação, com falhas registradas no cadastro e dados anteriores preservados.
+
+O navegador autenticado verifica a revisão dos dados a cada 45 segundos enquanto a aba está visível. Quando há novidades e a página está livre, ela recarrega mantendo a URL e os filtros. Se houver formulário alterado, campo em uso ou janela aberta, aparece um aviso para atualizar quando terminar; comentários em edição não são apagados automaticamente. O endpoint de status só fornece uma revisão, sem conteúdo das escalas.
+
+Na Oracle, prefira `bash scripts/oracle-compose.sh ...`: o script inclui automaticamente a configuração de leitura do Drive quando o arquivo privado estiver instalado, evitando removê-la em atualizações futuras. As credenciais não são enviadas ao Git nem incluídas na imagem.

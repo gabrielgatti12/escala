@@ -288,3 +288,11 @@ def forum_withdraw(request,pk):
     except ValidationError as error:
         messages.error(request,'; '.join(error.messages))
     return redirect('forum_topic',pk=pk)
+
+@login_required
+def live_status(request):
+    from django.http import JsonResponse
+    from .live import data_revision
+    response=JsonResponse({'revision':data_revision()})
+    response['Cache-Control']='private, no-store'
+    return response

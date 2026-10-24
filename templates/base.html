@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="{% static 'schedule/app.css' %}">
   <script defer src="{% static 'schedule/app.js' %}"></script>
 </head>
-<body>
+<body{% if user.is_authenticated %} data-live-status="{% url 'live_status' %}" data-live-revision="{{ live_revision }}"{% endif %}>
 <svg xmlns="http://www.w3.org/2000/svg" class="svg-sprite" aria-hidden="true"><defs>
 <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M16 3v4M8 3v4M3 11h18M8 15h2M14 15h2M8 18h2"/></symbol>
 <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 3 5"/></symbol>
@@ -45,6 +45,7 @@
 <main id="main-content">
 {% else %}<main class="auth-main">{% endif %}
 {% for message in messages %}<div class="toast {{ message.tags }}" role="status">{% include 'components/icon.html' with name='info' %}<span>{{ message }}</span></div>{% endfor %}
+{% if user.is_authenticated %}<div class="live-update" id="live-update" hidden role="status"><span>{% include 'components/icon.html' with name='info' %}Há novidades disponíveis. Atualize quando terminar o que está fazendo.</span><button class="button secondary small-button" id="live-refresh" type="button">Atualizar página</button></div>{% endif %}
 {% block content %}{% endblock %}
 </main>{% if user.is_authenticated %}</div>{% endif %}
 </body></html>

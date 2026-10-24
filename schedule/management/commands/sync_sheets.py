@@ -1,6 +1,6 @@
 import time
 from django.core.management.base import BaseCommand,CommandError
-from schedule.sheets import fetch_workbook,sync_workbook
+from schedule.sheets import fetch_workbook,sync_workbook,workbook_week_label
 from schedule.models import SheetSource,DriveFolder
 
 class Command(BaseCommand):
@@ -48,7 +48,8 @@ class Command(BaseCommand):
                         else:
                             book=fetch_workbook(source.spreadsheet_id)
                         summary=sync_workbook(book,source.spreadsheet_id)
-                        source.error='';source.save(update_fields=['error'])
+                        if not source.name: source.name=workbook_week_label(book)
+                        source.error='';source.save(update_fields=['name','error'])
                         self.stdout.write(summary)
                     except Exception as error:
                         failures+=1

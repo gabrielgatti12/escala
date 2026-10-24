@@ -10,75 +10,81 @@ from .services import propose_exchange, respond_exchange
 from .identity import resident_for_account
 @login_required
 def dashboard(request):
-    from django.core.paginator import Paginator
+    from datetime import date,timedelta
     from django.contrib.auth import get_user_model
-    from datetime import date
-    shifts=Shift.objects.filter(active=True).select_related('resident')
-    rotations=RotationActivity.objects.none()
-    shared=SharedActivity.objects.prefetch_related('residents').all()
-    filters={}
-    for key,lookup in [('from','starts_at__date__gte'),('to','starts_at__date__lte')]:
-        value=request.GET.get(key,'')
-        if value:
-            try:
-                filters[lookup]=date.fromisoformat(value)
-                rotations=rotations.filter(**{'date__gte' if key=='from' else 'date__lte':filters[lookup]})
-            except ValueError:
-                messages.error(request,'Informe datas válidas.')
-    shifts=shifts.filter(**filters)
-    shared=shared.filter(**filters)
-    resident=request.GET.get('resident','')
-    if resident.isdigit():
-        shifts=shifts.filter(resident_id=int(resident))
-        rotations=rotations.filter(resident_id=int(resident))
-        shared=shared.filter(residents__pk=int(resident))
-    if request.GET.get('interest')=='1':
-        shifts=shifts.filter(wants_exchange=True)
-        rotations=rotations.none()
-        shared=shared.none()
-    future=Shift.objects.filter(active=True,starts_at__gt=timezone.now()).select_related('resident')
-    from django.db.models import Min,Max
-    from datetime import timedelta
+    from django.db.models import Count,Min,Max
+    from django.http import HttpResponseForbidden
+    from .models import SheetSource,DriveFolder
     person=resident_for_account(request.user)
-    bounds=Shift.objects.filter(active=True).aggregate(first=Min('starts_at'),last=Max('ends_at'))
+    now=timezone.now()
     today=timezone.localdate()
+    tab=request.GET.get('tab','week')
+    if tab not in ['week','exchanges','sources']: tab='week'
+    if tab=='sources' and not request.user.is_superuser:
+        return HttpResponseForbidden('Somente o administrador pode gerenciar fontes.')
+    scope='all' if request.GET.get('scope')=='all' else 'mine'
+    active=Shift.objects.filter(active=True).select_related('resident')
+    future=active.filter(starts_at__gt=now)
+    upcoming=future.filter(resident=person).first() or future.first()
+    default_day=timezone.localtime(upcoming.starts_at).date() if upcoming else today
     try:
-        selected=date.fromisoformat(request.GET.get('week',today.isoformat()))
+        selected=date.fromisoformat(request.GET.get('week',default_day.isoformat()))
     except ValueError:
-        selected=today
+        selected=default_day
     week_start=selected-timedelta(days=selected.weekday())
-    week_end=week_start+timedelta(days=7)
-    weekly=shifts.filter(starts_at__date__gte=week_start,starts_at__date__lt=week_end)
-    if request.GET.get('scope','mine')!='all': weekly=weekly.filter(resident=person)
-    weekly_shared=shared.filter(active=True,allocated_to__isnull=True,starts_at__date__gte=week_start,starts_at__date__lt=week_end)
-    incomplete=IncompleteActivity.objects.filter(date__gte=week_start,date__lt=week_end).prefetch_related('residents')
-    if request.GET.get('scope','mine')!='all':
+    week_next=week_start+timedelta(days=7)
+    window={'starts_at__date__gte':week_start,'starts_at__date__lt':week_next}
+    weekly=active.filter(**window)
+    shared=SharedActivity.objects.filter(active=True,allocated_to__isnull=True).prefetch_related('residents')
+    weekly_shared=shared.filter(**window)
+    incomplete=IncompleteActivity.objects.filter(date__gte=week_start,date__lt=week_next).prefetch_related('residents')
+    own_week_count=weekly.filter(resident=person).count()
+    own_shared_count=weekly_shared.filter(residents=person).count()
+    if scope=='mine':
+        weekly=weekly.filter(resident=person)
         weekly_shared=weekly_shared.filter(residents=person)
         incomplete=incomplete.filter(residents=person)
-    if resident.isdigit(): incomplete=incomplete.filter(residents__pk=int(resident))
-    if request.GET.get('interest')=='1': incomplete=incomplete.none()
-    weekly_days=[]
-    grouped={}
-    for shift in weekly:
-        grouped.setdefault(timezone.localtime(shift.starts_at).date(),[]).append(shift)
-    unassigned={}
-    for activity in weekly_shared: unassigned.setdefault(timezone.localtime(activity.starts_at).date(),[]).append(activity)
-    undated={}
-    for activity in incomplete: undated.setdefault(activity.date,[]).append(activity)
+    resident_id=request.GET.get('resident','')
+    if resident_id.isdigit():
+        weekly=weekly.filter(resident_id=int(resident_id))
+        weekly_shared=weekly_shared.filter(residents__pk=int(resident_id))
+        incomplete=incomplete.filter(residents__pk=int(resident_id))
+    if request.GET.get('interest')=='1':
+        weekly=weekly.filter(wants_exchange=True)
+        weekly_shared=weekly_shared.none()
+        incomplete=incomplete.none()
+    grouped={};pending={};missing={}
+    for item in weekly: grouped.setdefault(timezone.localtime(item.starts_at).date(),[]).append(item)
+    for item in weekly_shared: pending.setdefault(timezone.localtime(item.starts_at).date(),[]).append(item)
+    for item in incomplete: missing.setdefault(item.date,[]).append(item)
+    days=[]
     for offset in range(7):
         day=week_start+timedelta(days=offset)
-        weekly_days.append((day,grouped.get(day,[]),unassigned.get(day,[]),undated.get(day,[])))
-    resident_choices=get_user_model().objects.filter(Q(shift__active=True)|Q(sharedactivity__active=True)|Q(incompleteactivity__isnull=False)).distinct().order_by('first_name','username')
+        shifts=grouped.get(day,[]);unassigned=pending.get(day,[]);no_time=missing.get(day,[])
+        days.append({'date':day,'shifts':shifts,'shared':unassigned,'incomplete':no_time,'today':day==today,'weekend':offset>4,'count':len(shifts)+len(unassigned)+len(no_time)})
+    residents=get_user_model().objects.filter(is_active=True).filter(Q(shift__active=True)|Q(sharedactivity__active=True)|Q(incompleteactivity__isnull=False)).distinct().order_by('first_name','username')
+    exchanges=Exchange.objects.filter(Q(proposer=person)|Q(recipient=person)).select_related('offered','requested','proposer','recipient')
+    allocations=Allocation.objects.filter(Q(proposer=person)|Q(recipient=person)).select_related('mine','theirs','proposer','recipient').order_by('-created_at')
+    pending_count=exchanges.filter(status='pending').count()+allocations.filter(status='pending').count()
+    received_count=exchanges.filter(status='pending',recipient=person).count()+allocations.filter(status='pending',recipient=person).count()
+    my_shared=list(shared.filter(residents=person))
+    allocation_options=[{'activity':item,'pair':','.join(str(pk) for pk in sorted(u.pk for u in item.residents.all())),'day':timezone.localtime(item.starts_at).date().isoformat()} for item in my_shared]
+    states={state.source:state for state in SyncState.objects.all()}
+    source_cards=[]
+    if request.user.is_superuser:
+        totals={item['source']:item['total'] for item in active.values('source').annotate(total=Count('pk'))}
+        for source in SheetSource.objects.select_related('folder').all().order_by('name','pk'):
+            source_cards.append({'source':source,'state':states.get(source.spreadsheet_id),'count':totals.get(source.spreadsheet_id,0)})
+    bounds=active.aggregate(first=Min('starts_at'),last=Max('ends_at'))
     return render(request,'dashboard.html',{
-        'resident_user':person,'week_days':weekly_days,'week_start':week_start,'week_previous':week_start-timedelta(days=7),'week_next':week_end,'bounds':bounds,'future_count':future.count(),'has_offered':future.filter(resident=person).exists(),'has_requested':future.exclude(resident=person).exists(),'resident_choices':resident_choices,'linked':person.pk!=request.user.pk,'mine':shifts.filter(resident=person),'now':timezone.now(),
-        'shared':shared.filter(active=True,allocated_to__isnull=True),'my_shared':SharedActivity.objects.filter(active=True,allocated_to__isnull=True,residents=resident_for_account(request.user)),'allocations':Allocation.objects.filter(Q(proposer=resident_for_account(request.user))|Q(recipient=resident_for_account(request.user))).select_related('mine','theirs','proposer','recipient')[:100],
-        'offered':future.filter(resident=resident_for_account(request.user)),
-        'requested':future.exclude(resident=resident_for_account(request.user)),
-        'others':Paginator(shifts.exclude(resident=resident_for_account(request.user)),50).get_page(request.GET.get('page')),
-        'rotations':Paginator(rotations,100).get_page(request.GET.get('rotation_page')),
-        'residents':resident_choices.filter(is_active=True),
-        'syncs':SyncState.objects.all(),
-        'exchanges':Exchange.objects.filter(Q(proposer=resident_for_account(request.user))|Q(recipient=resident_for_account(request.user))).select_related('offered','requested','proposer','recipient')[:100]})
+        'tab':tab,'scope':scope,'resident_user':person,'linked':person.pk!=request.user.pk,'resident_choices':residents,'residents':residents,
+        'days':days,'week_start':week_start,'week_last':week_next-timedelta(days=1),'week_previous':week_start-timedelta(days=7),'week_next':week_next,'today':today,'now':now,
+        'own_week_count':own_week_count,'own_shared_count':own_shared_count,'pending_count':pending_count,'received_count':received_count,
+        'future_count':future.count(),'has_offered':future.filter(resident=person).exists(),'has_requested':future.exclude(resident=person).exists(),
+        'offered':future.filter(resident=person),'requested':future.exclude(resident=person),'bounds':bounds,
+        'exchanges':exchanges[:100],'recent_exchanges':exchanges[:4],'allocations':allocations[:100],'my_shared':my_shared,'allocation_options':allocation_options,
+        'latest_sync':SyncState.objects.order_by('-last_success').first(),'source_cards':source_cards,'drive_folders':DriveFolder.objects.all() if request.user.is_superuser else [],
+    })
 @login_required
 @require_POST
 def propose(request):
@@ -188,3 +194,27 @@ def link_resident(request):
     except (ValidationError,IntegrityError):
         messages.error(request,'Este residente já está vinculado a outra conta.')
     return redirect('dashboard')
+
+@login_required
+@require_POST
+def register_source(request):
+    from django.http import HttpResponseForbidden
+    from urllib.parse import urlparse
+    import re
+    from .models import SheetSource
+    if not request.user.is_superuser:
+        return HttpResponseForbidden('Somente o administrador pode adicionar planilhas.')
+    value=request.POST.get('url','').strip()
+    parsed=urlparse(value)
+    if parsed.scheme:
+        match=re.fullmatch(r'/spreadsheets/d/([A-Za-z0-9_-]{20,100})(?:/.*)?',parsed.path)
+        sheet_id=match.group(1) if parsed.scheme=='https' and parsed.hostname=='docs.google.com' and match else ''
+    else: sheet_id=value if re.fullmatch(r'[A-Za-z0-9_-]{20,100}',value) else ''
+    if not sheet_id:
+        messages.error(request,'Cole um link válido de uma planilha Google Sheets.')
+    else:
+        source,created=SheetSource.objects.get_or_create(spreadsheet_id=sheet_id,defaults={'name':request.POST.get('name','').strip()[:200]})
+        if not source.enabled:
+            source.enabled=True;source.save(update_fields=['enabled'])
+        messages.success(request,'Planilha cadastrada. A sincronização acontece no próximo ciclo, em até 5 minutos.')
+    return redirect('/?tab=sources')

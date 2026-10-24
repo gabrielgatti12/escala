@@ -305,3 +305,50 @@ class WorkflowTests(TestCase):
             if offset==7: sync_workbook(book,source)
         self.assertEqual(Shift.objects.filter(source__startswith='week-source',active=True).count(),2)
         self.assertEqual(Shift.objects.filter(source__startswith='week-source').values('resident_id').distinct().count(),1)
+    def test_dashboard_opens_nearest_upcoming_week(self):
+        self.client.force_login(self.a)
+        response=self.client.get('/')
+        day=timezone.localtime(self.s1.starts_at).date()
+        self.assertEqual(response.context['week_start'],day-timedelta(days=day.weekday()))
+        self.assertContains(response,'Solicitar troca')
+    def test_week_selection_is_preserved_explicitly(self):
+        self.client.force_login(self.a)
+        response=self.client.get('/',{'week':'2026-09-28'})
+        self.assertEqual(response.context['week_start'].isoformat(),'2026-09-28')
+    def test_source_registration_is_administrator_only(self):
+        self.client.force_login(self.a)
+        self.assertEqual(self.client.get('/?tab=sources').status_code,403)
+        self.assertEqual(self.client.post('/fontes/adicionar/',{'url':'https://docs.google.com/spreadsheets/d/'+'a'*30+'/edit'}).status_code,403)
+    def test_admin_can_add_a_week_without_duplicates(self):
+        from .models import SheetSource
+        account=get_user_model().objects.create_superuser('admin-sources',password='test-only-password')
+        self.client.force_login(account)
+        url='https://docs.google.com/spreadsheets/d/'+'a'*30+'/edit?usp=sharing'
+        for _ in range(2):
+            self.assertEqual(self.client.post('/fontes/adicionar/',{'url':url,'name':'Próxima semana'}).status_code,302)
+        self.assertEqual(SheetSource.objects.count(),1)
+        self.assertContains(self.client.get('/?tab=sources'),'Próxima semana')
+        self.assertContains(self.client.get('/?tab=sources'),'Aguardando importação')
+    def test_source_registration_rejects_other_hosts(self):
+        from .models import SheetSource
+        account=get_user_model().objects.create_superuser('admin-invalid-source',password='test-only-password')
+        self.client.force_login(account)
+        for url in ['https://example.com/spreadsheets/d/'+'a'*30+'/edit','http://docs.google.com/spreadsheets/d/'+'a'*30+'/edit','https://docs.google.com.evil.example/spreadsheets/d/'+'a'*30+'/edit']:
+            self.client.post('/fontes/adicionar/',{'url':url})
+        self.assertEqual(SheetSource.objects.count(),0)
+    def test_application_assets_are_registered(self):
+        from django.contrib.staticfiles import finders
+        self.assertTrue(finders.find('schedule/app.css'))
+        self.assertTrue(finders.find('schedule/app.js'))
+    def test_sync_labels_an_added_week_from_its_actual_dates(self):
+        from openpyxl import Workbook
+        from unittest.mock import patch
+        from .models import SheetSource
+        book=Workbook();sheet=book.active;sheet.title='Espelho Semanal'
+        from datetime import datetime
+        sheet.append([None,datetime(2026,10,26)])
+        sheet.append([None,'Segunda']);sheet.append(['INSTITUTO','Ambulatório'])
+        sheet.append([None,'R1','8-18','A',None,'Pessoa Um'])
+        with patch('schedule.management.commands.sync_sheets.fetch_workbook',return_value=book):
+            call_command('sync_sheets','a'*30)
+        self.assertEqual(SheetSource.objects.get().name,'Semana de 26/10 a 01/11/2026')

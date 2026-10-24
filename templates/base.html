@@ -1,5 +1,49 @@
+{% load static %}
 <!doctype html>
-<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Escala · Residência</title>
-<style>
-:root{--ink:#193047;--muted:#64768a;--teal:#087f82;--line:#dfe8ee;--bg:#f4f7fa}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,sans-serif}header{background:#12384b;color:white;padding:17px 5%;display:flex;align-items:center;justify-content:space-between;gap:15px}header strong{font-size:20px;letter-spacing:-.5px}header small{font-size:13px;font-weight:400;opacity:.7}header form{font-size:13px}header button{background:#285369;margin-left:10px}main{max-width:1360px;margin:36px auto;padding:0 24px}h1{font-size:34px;letter-spacing:-1px;margin:6px 0}h2{font-size:21px;margin:0 0 15px}h3{font-size:14px}p{margin:10px 0}section{background:white;border:1px solid var(--line);padding:24px;border-radius:16px;margin:22px 0;box-shadow:0 4px 16px #17304804}.hero,.section-head{display:flex;justify-content:space-between;align-items:center;gap:18px}.eyebrow{font-size:11px;letter-spacing:1.6px;font-weight:750;color:var(--teal)}.muted{color:var(--muted)}a{color:var(--teal);text-underline-offset:3px}button,.button{display:inline-block;background:var(--teal);color:white;border:1px solid transparent;border-radius:8px;padding:10px 16px;font:600 13px system-ui;text-decoration:none;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.secondary{background:white;border-color:var(--line);color:var(--ink)}button:hover:not(:disabled),.button:hover{filter:brightness(.95)}input,select{padding:10px 12px;border:1px solid #c9d6df;border-radius:8px;background:white;color:var(--ink);font:inherit;max-width:100%}select{display:block;width:min(100%,650px);margin-top:6px}input:focus,select:focus{outline:2px solid #49b4b7;outline-offset:2px}label{display:block;margin:14px 0;font-size:13px;font-weight:600}input[type=checkbox]{margin-right:8px}table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:left;padding:13px 10px;border-bottom:1px solid #e7edf2}th{color:var(--muted);font-size:11px;letter-spacing:.5px;background:#f8fafc}td{vertical-align:top}.scroll{overflow-x:auto}.inline{display:inline}.message,.notice{padding:15px 18px;border-radius:10px;margin:16px 0;background:#e8f4f2;border:1px solid #c9e5e0}.notice{background:#fff8e9;border-color:#efdeb7;color:#715323}.pills{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0}.pills a{padding:9px 15px;text-decoration:none;border-radius:24px;color:var(--muted);background:white;border:1px solid var(--line);font-size:13px;font-weight:600}.pills a.active{background:var(--ink);color:white;border-color:var(--ink)}.week-filter{display:flex;align-items:end;flex-wrap:wrap;gap:14px;margin-bottom:20px}.week-filter label{margin:0}.week-filter input{display:block;margin-top:6px}.week-grid{display:grid;grid-template-columns:repeat(7,minmax(130px,1fr));gap:10px;overflow-x:auto;padding-bottom:10px}.day{background:#f7f9fc;border:1px solid #e8edf3;border-radius:11px;min-height:190px;padding:10px}.day-label{color:var(--muted);font-size:11px;text-transform:uppercase;display:flex;align-items:center;justify-content:space-between;margin-bottom:13px}.day-label strong{font-size:21px;color:var(--ink)}.shift-card{background:#fff;border:1px solid var(--line);border-left:3px solid #9baebf;border-radius:8px;padding:10px;margin:8px 0}.shift-card.own{border-left-color:var(--teal);background:#effaf8}.shift-card h3{font-size:12px;line-height:1.45;margin:7px 0;overflow-wrap:anywhere}.shift-card p{font-size:11px;color:var(--muted)}.source-link{font-size:10px}.shift-card.pending{border-left-color:#d5a34a;background:#fffbef}.shift-time{font-size:11px;font-weight:750;color:var(--teal)}.empty-day{font-size:11px;color:#91a0af;margin-top:20px}.badge{display:inline-block;font-size:10px;padding:3px 6px;border-radius:5px;background:#d7eee6;color:#17654a}.small{padding:6px 9px;font-size:10px;margin-top:9px}details{border:1px solid var(--line);background:white;border-radius:12px;margin:16px 0;padding:16px 20px}summary{cursor:pointer;font-weight:650;font-size:14px}details>section{border:0;box-shadow:none;padding:10px 0;margin:15px 0 0}.account-link{border-color:#beddda;background:#f2fbf9}.account-link p{font-size:13px}.reference{background:#fafbfc}article hr{border:0;border-top:1px solid var(--line);margin:20px 0}@media(max-width:700px){main{padding:0 14px;margin-top:22px}section{padding:17px}.hero,.section-head{align-items:flex-start;flex-direction:column}h1{font-size:28px}header small{display:none}.week-grid{grid-template-columns:repeat(7,155px)}.hero .button{font-size:12px}}
-</style></head><body><header><strong>▦ Escala <small> / Residência</small></strong>{% if user.is_authenticated %}<form method="post" action="{% url 'logout' %}">{% csrf_token %}{{ user.get_full_name|default:user.username }} <button>Sair</button></form>{% endif %}</header><main>{% for message in messages %}<p class="message" role="status">{{ message }}</p>{% endfor %}{% block content %}{% endblock %}</main></body></html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#123b3b"><title>{% block title %}Escala · Residência{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'schedule/app.css' %}">
+  <script defer src="{% static 'schedule/app.js' %}"></script>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" class="svg-sprite" aria-hidden="true"><defs>
+<symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M16 3v4M8 3v4M3 11h18M8 15h2M14 15h2M8 18h2"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 3 5"/></symbol>
+<symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 7h16m-4-4 4 4-4 4M20 17H4m4-4-4 4 4 4"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+<symbol id="i-source" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z M14 3v6h6M8 13h8M8 17h5"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+<symbol id="i-link" viewBox="0 0 24 24"><path d="M14 3h7v7M21 3l-9 9M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/></symbol>
+<symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+<symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 4H4v16h5M10 12h11m-4-4 4 4-4 4"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/></symbol>
+</defs></svg>
+{% if user.is_authenticated %}
+<aside class="sidebar">
+  <a class="brand" href="{% url 'dashboard' %}"><span class="brand-mark">{% include 'components/icon.html' with name='grid' %}</span><span>escala<span class="brand-caption">RESIDÊNCIA MÉDICA</span></span></a>
+  <div class="nav-label">MEU ESPAÇO</div>
+  <nav class="main-nav" aria-label="Navegação principal">
+    <a href="{% url 'dashboard' %}?scope=mine" class="{% if tab == 'week' and scope == 'mine' %}active{% endif %}">{% include 'components/icon.html' with name='calendar' %}<span>Minha escala</span></a>
+    <a href="{% url 'dashboard' %}?scope=all" class="{% if tab == 'week' and scope == 'all' %}active{% endif %}">{% include 'components/icon.html' with name='users' %}<span>Escala dos colegas</span></a>
+    <a href="{% url 'dashboard' %}?tab=exchanges" class="{% if tab == 'exchanges' %}active{% endif %}">{% include 'components/icon.html' with name='swap' %}<span>Trocas e divisões</span>{% if received_count %}<span class="nav-count">{{ received_count }}</span>{% endif %}</a>
+    <a href="{% url 'calendar' %}" class="{% if request.resolver_match.url_name == 'calendar' %}active{% endif %}">{% include 'components/icon.html' with name='grid' %}<span>Calendário mensal</span></a>
+    {% if user.is_superuser %}<div class="nav-label secondary-label">GERENCIAR</div><a href="{% url 'dashboard' %}?tab=sources" class="{% if tab == 'sources' %}active{% endif %}">{% include 'components/icon.html' with name='source' %}<span>Planilhas e fontes</span></a>{% endif %}
+    {% if user.is_staff %}<a href="/admin/">{% include 'components/icon.html' with name='users' %}<span>Administrar contas</span></a>{% endif %}
+  </nav>
+  <div class="sidebar-bottom"><div class="sidebar-note">Uma escala.<br>Todos os seus plantões.</div><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="logout" type="submit">{% include 'components/icon.html' with name='logout' %} Sair da conta</button></form></div>
+</aside>
+<div class="workspace">
+<header class="topbar"><span class="topbar-label">PLANEJAMENTO DA RESIDÊNCIA</span><div class="account-chip"><span class="avatar">{{ user.first_name|default:user.username|first|upper }}</span><div><strong>{{ user.get_full_name|default:user.username }}</strong><small>{% if user.is_superuser %}Administrador{% else %}Residente{% endif %}</small></div></div><form class="mobile-logout" method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" class="icon-button" aria-label="Sair da conta">{% include 'components/icon.html' with name='logout' %}</button></form></header>
+<main id="main-content">
+{% else %}<main class="auth-main">{% endif %}
+{% for message in messages %}<div class="toast {{ message.tags }}" role="status">{% include 'components/icon.html' with name='info' %}<span>{{ message }}</span></div>{% endfor %}
+{% block content %}{% endblock %}
+</main>{% if user.is_authenticated %}</div>{% endif %}
+</body></html>

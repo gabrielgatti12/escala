@@ -52,3 +52,9 @@ O ambiente preparado é de desenvolvimento. Antes de disponibilizar a residentes
 Para produção, `DJANGO_DEBUG=0`, `DJANGO_SECRET_KEY` forte e `DJANGO_ALLOWED_HOSTS` são obrigatórios. `DATABASE_PATH` permite escolher o arquivo SQLite. Não exponha o servidor de desenvolvimento publicamente.
 
 A dupla decide a divisão entre si, pelo fluxo de proposta e aceite no aplicativo. Não há decisão automática baseada na posição dos nomes. O calendário final é a visão `/calendario/` do aplicativo. A exportação `/calendario.ics` inclui somente plantões definidos do usuário conectado; ela é um arquivo estático, que deve ser reexportado após alterações. Não há sincronização de escrita com Google Calendar nem com Google Sheets.
+
+## Interface e cadastro de novas semanas
+
+A página inicial abre na semana do próximo plantão, mantendo a seleção explícita quando informada. A navegação separa Minha escala, Escala dos colegas, Trocas e divisões, Calendário mensal e Planilhas e fontes (administrador). Os cartões distinguem plantões definidos, duplas pendentes e horários não informados. O botão Solicitar troca permite escolher os dois plantões; o atalho no cartão preenche o plantão escolhido. A divisão filtra atividades da mesma dupla e data, com validação final no servidor.
+
+Em Planilhas e fontes, o administrador pode cadastrar uma semana pelo link Google Sheets. O trabalhador importa no próximo ciclo e preserva as semanas anteriores. Novas fontes sem nome recebem um título derivado das datas reais do espelho. Os estilos e scripts estão em `static/schedule/`, com `STATICFILES_DIRS` configurado; `collectstatic` gera os arquivos versionados na imagem de produção.

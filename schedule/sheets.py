@@ -133,3 +133,13 @@ def sync_workbook(book, source):
     state.summary=f'{len(seen)} plantões definidos; {pending} alocações pendentes; {len(incomplete_seen)} sem horário válido; {preserved+retained} trocas preservadas; {retained+assigned_obsolete} exigem conciliação.'
     state.save()
     return state.summary
+
+def workbook_week_label(book):
+    row=next(book['Espelho Semanal'].iter_rows(min_row=1,max_row=1,values_only=True),())
+    dates=[value.date() for value in row if isinstance(value,datetime)]
+    if not dates: return 'Planilha semanal'
+    first,last=min(dates),max(dates)
+    if (last-first).days<=6:
+        first=first-timedelta(days=first.weekday())
+        last=first+timedelta(days=6)
+    return f'Semana de {first:%d/%m} a {last:%d/%m/%Y}'

@@ -1,9 +1,12 @@
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
+from urllib.parse import quote
 class Shift(models.Model):
     external_id = models.CharField(max_length=120, unique=True)
     wants_exchange = models.BooleanField(default=False)
     source = models.CharField(max_length=100,blank=True)
+    source_cell = models.CharField(max_length=30,blank=True)
     active = models.BooleanField(default=True)
     resident = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT)
     starts_at = models.DateTimeField()
@@ -12,8 +15,11 @@ class Shift(models.Model):
     class Meta:
         ordering = ['starts_at']
         constraints = [models.CheckConstraint(condition=models.Q(ends_at__gt=models.F('starts_at')),name='positive_shift_duration')]
+    @property
+    def source_url(self):
+        return f"https://docs.google.com/spreadsheets/d/{self.source}/edit?range="+quote("'Espelho Semanal'!"+self.source_cell) if self.source and self.source_cell else ''
     def __str__(self):
-        return f'{self.resident.get_full_name() or self.resident.username} · {self.starts_at:%d/%m %H:%M} · {self.sector}'
+        return f'{self.resident.get_full_name() or self.resident.username} · {timezone.localtime(self.starts_at):%d/%m %H:%M} · {self.sector}'
 class Exchange(models.Model):
     offered = models.ForeignKey(Shift,on_delete=models.PROTECT,related_name='offers')
     requested = models.ForeignKey(Shift,on_delete=models.PROTECT,related_name='requests')
@@ -42,6 +48,7 @@ class SyncState(models.Model):
     summary = models.CharField(max_length=250,blank=True)
 
 class SharedActivity(models.Model):
+    source_cell = models.CharField(max_length=30,blank=True)
     active = models.BooleanField(default=True)
     allocated_to = models.ForeignKey(settings.AUTH_USER_MODEL,null=True,blank=True,on_delete=models.PROTECT,related_name='allocated_activities')
     external_id = models.CharField(max_length=120,unique=True)
@@ -50,8 +57,11 @@ class SharedActivity(models.Model):
     starts_at = models.DateTimeField()
     ends_at = models.DateTimeField()
     sector = models.CharField(max_length=120)
+    @property
+    def source_url(self):
+        return f"https://docs.google.com/spreadsheets/d/{self.source}/edit?range="+quote("'Espelho Semanal'!"+self.source_cell) if self.source and self.source_cell else ''
     def __str__(self):
-        return f'{self.starts_at:%d/%m %H:%M} · {self.sector}'
+        return f'{timezone.localtime(self.starts_at):%d/%m %H:%M} · {self.sector}'
     class Meta:
         ordering = ['starts_at','sector']
 
@@ -63,3 +73,23 @@ class Allocation(models.Model):
     status = models.CharField(max_length=12,choices=Exchange._meta.get_field('status').choices,default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
     resolved_at = models.DateTimeField(null=True,blank=True)
+
+class ResidentAccess(models.Model):
+    account = models.OneToOneField(settings.AUTH_USER_MODEL,on_delete=models.CASCADE,related_name='resident_access')
+    resident = models.OneToOneField(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,related_name='access_account')
+    def __str__(self):
+        return f'{self.account} → {self.resident.get_full_name() or self.resident.username}'
+
+class IncompleteActivity(models.Model):
+    external_id = models.CharField(max_length=120,unique=True)
+    source = models.CharField(max_length=100)
+    source_cell = models.CharField(max_length=30)
+    date = models.DateField()
+    residents = models.ManyToManyField(settings.AUTH_USER_MODEL)
+    sector = models.CharField(max_length=120)
+    raw_time = models.CharField(max_length=100,blank=True)
+    class Meta:
+        ordering=['date','sector']
+    @property
+    def source_url(self):
+        return f"https://docs.google.com/spreadsheets/d/{self.source}/edit?range="+quote("'Espelho Semanal'!"+self.source_cell)

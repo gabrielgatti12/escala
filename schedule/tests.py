@@ -103,7 +103,7 @@ class WorkflowTests(TestCase):
         rotation.append(['AMB']*5);rotation.append(['CC']*5)
         sync_workbook(book,'test-source');sync_workbook(book,'test-source')
         self.assertEqual(Shift.objects.filter(source='test-source').count(),1)
-        self.assertGreater(RotationActivity.objects.count(),0)
+        self.assertEqual(RotationActivity.objects.count(),0)
         imported=Shift.objects.get(source='test-source')
         self.assertFalse(imported.resident.has_usable_password())
         imported.wants_exchange=True;imported.save()
@@ -206,3 +206,59 @@ class WorkflowTests(TestCase):
         mine.refresh_from_db();theirs.refresh_from_db()
         self.assertEqual((mine.allocated_to_id,theirs.allocated_to_id),(a.pk,b.pk))
         self.assertEqual(Shift.objects.filter(external_id__startswith='allocation:',active=True).count(),2)
+    def test_linked_administrator_uses_resident_identity(self):
+        from .models import ResidentAccess
+        admin=get_user_model().objects.create_superuser('coordenador',password='test-only-password')
+        self.client.force_login(admin)
+        response=self.client.post('/conta/vincular/',{'resident':self.a.pk})
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(ResidentAccess.objects.get(account=admin).resident,self.a)
+        response=self.client.get('/')
+        self.assertTrue(response.context['has_offered'])
+        self.assertEqual(response.context['resident_user'],self.a)
+        self.client.post('/trocas/criar/',{'offered':self.s1.pk,'requested':self.s2.pk})
+        self.assertEqual(Exchange.objects.get().proposer,self.a)
+        ics=self.client.get('/calendario.ics').content.decode()
+        self.assertIn(f'UID:shift-{self.s1.pk}@escala',ics)
+        self.assertNotIn(f'UID:shift-{self.s2.pk}@escala',ics)
+    def test_resident_cannot_link_to_another_identity(self):
+        from .models import ResidentAccess
+        self.client.force_login(self.a)
+        self.assertEqual(self.client.post('/conta/vincular/',{'resident':self.b.pk}).status_code,403)
+        self.assertFalse(ResidentAccess.objects.exists())
+    def test_no_future_shifts_explains_why_exchange_is_disabled(self):
+        Shift.objects.update(starts_at=timezone.now()-timedelta(days=2),ends_at=timezone.now()-timedelta(days=1))
+        self.client.force_login(self.a)
+        response=self.client.get('/')
+        self.assertContains(response,'Não há plantões futuros importados')
+        self.assertContains(response,'disabled')
+        self.assertNotContains(response,'<h2>Referências de rotação</h2>')
+    def test_headers_in_time_column_and_missing_times(self):
+        from openpyxl import Workbook
+        from .sheets import sync_workbook
+        from .models import IncompleteActivity
+        book=Workbook();sheet=book.active;sheet.title='Espelho Semanal'
+        sheet.append([None,self.start.replace(tzinfo=None)])
+        sheet.append([None,'Segunda'])
+        sheet.append(['INSTITUTO','Ambulatório'])
+        sheet.append([None,'R1','8-18','A',None,'Pessoa Um'])
+        sheet.append(['UNEX','R2','U.E. Centro Norte'])
+        sheet.append([None,None,'9-18','B',None,'Pessoa Dois'])
+        sheet.append([None,None,None,'C',None,'Pessoa Tres'])
+        sync_workbook(book,'header-source')
+        shift=Shift.objects.get(source='header-source',source_cell='C6:G6')
+        self.assertEqual(shift.sector,'UNEX · U.E. Centro Norte')
+        self.assertEqual(timezone.localtime(shift.starts_at).hour,9)
+        self.assertIn('09:00',str(shift))
+        self.assertEqual(IncompleteActivity.objects.get(source='header-source').source_cell,'C7:G7')
+        self.assertEqual(Shift.objects.filter(source='header-source').count(),2)
+    def test_linked_recipient_can_confirm_exchange(self):
+        from .models import ResidentAccess
+        exchange=self.propose()
+        account=get_user_model().objects.create_superuser('admin-recipient',password='test-only-password')
+        ResidentAccess.objects.create(account=account,resident=self.b)
+        self.client.force_login(account)
+        self.assertContains(self.client.get('/'),f'/trocas/{exchange.pk}/accept/')
+        self.client.post(f'/trocas/{exchange.pk}/accept/')
+        exchange.refresh_from_db()
+        self.assertEqual(exchange.status,'accepted')

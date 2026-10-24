@@ -13,7 +13,7 @@ services:
     build:
       context: ..
     env_file: .env
-    command: ["sh", "-c", "exec python manage.py sync_sheets $$SHEET_IDS --interval $${SYNC_INTERVAL:-300}"]
+    command: ["sh", "-c", "exec python manage.py sync_sheets $$SHEET_IDS --registered --interval $${SYNC_INTERVAL:-300}"]
     volumes:
       - data:/data
     restart: unless-stopped

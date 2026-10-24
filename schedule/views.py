@@ -68,7 +68,7 @@ def dashboard(request):
     for offset in range(7):
         day=week_start+timedelta(days=offset)
         weekly_days.append((day,grouped.get(day,[]),unassigned.get(day,[]),undated.get(day,[])))
-    resident_choices=get_user_model().objects.filter(Q(shift__isnull=False)|Q(rotationactivity__isnull=False)|Q(sharedactivity__isnull=False)|Q(incompleteactivity__isnull=False)).distinct().order_by('first_name','username')
+    resident_choices=get_user_model().objects.filter(Q(shift__active=True)|Q(sharedactivity__active=True)|Q(incompleteactivity__isnull=False)).distinct().order_by('first_name','username')
     return render(request,'dashboard.html',{
         'resident_user':person,'week_days':weekly_days,'week_start':week_start,'week_previous':week_start-timedelta(days=7),'week_next':week_end,'bounds':bounds,'future_count':future.count(),'has_offered':future.filter(resident=person).exists(),'has_requested':future.exclude(resident=person).exists(),'resident_choices':resident_choices,'linked':person.pk!=request.user.pk,'mine':shifts.filter(resident=person),'now':timezone.now(),
         'shared':shared.filter(active=True,allocated_to__isnull=True),'my_shared':SharedActivity.objects.filter(active=True,allocated_to__isnull=True,residents=resident_for_account(request.user)),'allocations':Allocation.objects.filter(Q(proposer=resident_for_account(request.user))|Q(recipient=resident_for_account(request.user))).select_related('mine','theirs','proposer','recipient')[:100],
@@ -76,7 +76,7 @@ def dashboard(request):
         'requested':future.exclude(resident=resident_for_account(request.user)),
         'others':Paginator(shifts.exclude(resident=resident_for_account(request.user)),50).get_page(request.GET.get('page')),
         'rotations':Paginator(rotations,100).get_page(request.GET.get('rotation_page')),
-        'residents':get_user_model().objects.filter(is_active=True).order_by('first_name','username'),
+        'residents':resident_choices.filter(is_active=True),
         'syncs':SyncState.objects.all(),
         'exchanges':Exchange.objects.filter(Q(proposer=resident_for_account(request.user))|Q(recipient=resident_for_account(request.user))).select_related('offered','requested','proposer','recipient')[:100]})
 @login_required
@@ -175,7 +175,7 @@ def link_resident(request):
     except ValueError:
         messages.error(request,'Selecione seu nome de residente.')
         return redirect('dashboard')
-    target=get_object_or_404(get_user_model().objects.filter(Q(shift__isnull=False)|Q(rotationactivity__isnull=False)|Q(sharedactivity__isnull=False)|Q(incompleteactivity__isnull=False)).distinct(),pk=pk)
+    target=get_object_or_404(get_user_model().objects.filter(Q(shift__active=True)|Q(sharedactivity__active=True)|Q(incompleteactivity__isnull=False)).distinct(),pk=pk)
     try:
         with transaction.atomic():
             if ResidentAccess.objects.filter(resident=target).exclude(account=request.user).exists():

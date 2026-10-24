@@ -93,3 +93,19 @@ class IncompleteActivity(models.Model):
     @property
     def source_url(self):
         return f"https://docs.google.com/spreadsheets/d/{self.source}/edit?range="+quote("'Espelho Semanal'!"+self.source_cell)
+
+class DriveFolder(models.Model):
+    folder_id = models.CharField(max_length=100,unique=True)
+    name = models.CharField(max_length=200,blank=True)
+    enabled = models.BooleanField(default=True)
+    last_success = models.DateTimeField(null=True,blank=True)
+    error = models.CharField(max_length=250,blank=True)
+    def __str__(self): return self.name or self.folder_id
+
+class SheetSource(models.Model):
+    spreadsheet_id = models.CharField(max_length=100,unique=True)
+    name = models.CharField(max_length=200,blank=True)
+    folder = models.ForeignKey(DriveFolder,null=True,blank=True,on_delete=models.SET_NULL)
+    enabled = models.BooleanField(default=True)
+    error = models.CharField(max_length=250,blank=True)
+    def __str__(self): return self.name or self.spreadsheet_id

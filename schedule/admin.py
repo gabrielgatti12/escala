@@ -32,3 +32,17 @@ from .models import ResidentAccess
 class ResidentAccessAdmin(admin.ModelAdmin):
     list_display=['account','resident']
     autocomplete_fields=['account','resident']
+
+from .models import DriveFolder,SheetSource,IncompleteActivity
+@admin.register(DriveFolder)
+class DriveFolderAdmin(admin.ModelAdmin):
+    list_display=['name','folder_id','enabled','last_success','error']
+    readonly_fields=['last_success','error']
+@admin.register(SheetSource)
+class SheetSourceAdmin(admin.ModelAdmin):
+    list_display=['name','spreadsheet_id','folder','enabled','error']
+    readonly_fields=['error']
+    list_filter=['enabled','folder']
+@admin.register(IncompleteActivity)
+class IncompleteActivityAdmin(admin.ModelAdmin):
+    list_display=['date','sector','source_cell','raw_time']

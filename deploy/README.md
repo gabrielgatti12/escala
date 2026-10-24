@@ -33,3 +33,22 @@ docker compose -f deploy/compose.yaml up -d
 Não é necessário escolher domínio antes de preparar a instância. Para acesso público com credenciais, é necessário HTTPS com certificado válido para o endereço escolhido. As etapas de TLS, DNS, acesso SSH e implantação ainda dependem dos dados da instância.
 
 Esta configuração usa SQLite com apenas um processo web, adequada para avaliação inicial. Antes de ampliar o número de usuários/processos, migrar para PostgreSQL e validar concorrência dos fluxos de confirmação.
+
+## Reunir semanas de pastas mensais do Google Drive
+
+A sincronização mantém um cadastro de fontes (`SheetSource`) e importa todas as fontes ativas para o mesmo calendário. Novas semanas são adicionadas sem apagar as semanas anteriores. Fontes desativadas pelo administrador não são reativadas pela descoberta. Exclusões ou mudanças de acesso no Drive não apagam automaticamente o histórico local.
+
+Para descobrir automaticamente a pasta principal e suas subpastas mensais:
+
+1. Habilite a Google Drive API em um projeto Google Cloud e crie uma conta de serviço. Compartilhe **somente a pasta de escalas** com o e-mail dessa conta, como **Leitor**. A integração usa o escopo `drive.readonly`.
+2. Guarde a credencial JSON na instância como `deploy/google-service-account.json`, fora do Git e da imagem Docker. Não envie seu conteúdo ao chat. Configure permissão de leitura apenas para o operador e o UID 10001 do contêiner (por exemplo, proprietário root, grupo 10001 e modo 640). O arquivo é montado somente no trabalhador de sincronização, como secret de leitura.
+3. Cadastre o ID da pasta principal em **Drive folders**, no administrador do aplicativo. Os IDs das planilhas semanais serão descobertos recursivamente. Não precisa cadastrar cada mês ou semana.
+4. Use o complemento de configuração:
+
+```bash
+docker compose -f deploy/compose.yaml -f deploy/compose.drive.yaml up -d
+```
+
+A pasta será reexaminada a cada intervalo; todas as páginas da listagem são percorridas, com limites explícitos de 1000 pastas e 10000 planilhas. A descoberta só é salva após terminar sem erros. Somente arquivos nativos Google Sheets são descobertos; backups XLSX não são importados em duplicidade.
+
+Sem credencial Drive, planilhas públicas cadastradas individualmente por ID continuam funcionando. O link de uma pasta, sozinho, não autentica a API de listagem. A descoberta real deve ser validada após configurar a credencial na instância; testes locais simulam a paginação e as respostas da API, sem provar acesso à pasta real.

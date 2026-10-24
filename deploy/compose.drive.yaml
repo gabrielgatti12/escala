@@ -1,0 +1,10 @@
+# Optional: use alongside compose.yaml only after installing the private credential file.
+services:
+  sync:
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/google_service_account
+    secrets:
+      - google_service_account
+secrets:
+  google_service_account:
+    file: ./google-service-account.json

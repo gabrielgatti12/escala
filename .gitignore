@@ -5,3 +5,4 @@ __pycache__/
 .env
 staticfiles/
 deploy/.env
+deploy/google-service-account.json

@@ -262,3 +262,46 @@ class WorkflowTests(TestCase):
         self.client.post(f'/trocas/{exchange.pk}/accept/')
         exchange.refresh_from_db()
         self.assertEqual(exchange.status,'accepted')
+    def test_drive_discovers_month_subfolders_and_all_pages(self):
+        from unittest.mock import Mock
+        from .drive import discover_folder,FOLDER_MIME,SHEET_MIME
+        from .models import DriveFolder,SheetSource
+        folder=DriveFolder.objects.create(folder_id='rootfolder0001',name='Escalas')
+        SheetSource.objects.create(spreadsheet_id='spreadsheet002',enabled=False)
+        payloads=[
+            {'files':[{'id':'monthfolder001','name':'Outubro','mimeType':FOLDER_MIME}],'nextPageToken':'page-two'},
+            {'files':[{'id':'spreadsheet001','name':'Semana 1','mimeType':SHEET_MIME}]},
+            {'files':[{'id':'spreadsheet002','name':'Semana 2','mimeType':SHEET_MIME}]},
+        ]
+        session=Mock()
+        responses=[]
+        for payload in payloads:
+            response=Mock();response.json.return_value=payload;responses.append(response)
+        session.get.side_effect=responses
+        self.assertEqual(discover_folder(session,folder),2)
+        self.assertEqual(SheetSource.objects.count(),2)
+        self.assertFalse(SheetSource.objects.get(spreadsheet_id='spreadsheet002').enabled)
+        self.assertEqual(session.get.call_args_list[1].kwargs['params']['pageToken'],'page-two')
+        self.assertIn('monthfolder001',session.get.call_args_list[2].kwargs['params']['q'])
+    def test_failed_drive_discovery_does_not_save_partial_listing(self):
+        from unittest.mock import Mock
+        from .drive import discover_folder,FOLDER_MIME,SHEET_MIME
+        from .models import DriveFolder,SheetSource
+        folder=DriveFolder.objects.create(folder_id='rootfolder0001')
+        response=Mock();response.json.return_value={'files':[{'id':'spreadsheet001','name':'Semana','mimeType':SHEET_MIME},{'id':'monthfolder001','name':'Mês','mimeType':FOLDER_MIME}]}
+        session=Mock();session.get.side_effect=[response,RuntimeError('Unavailable')]
+        with self.assertRaises(RuntimeError): discover_folder(session,folder)
+        self.assertFalse(SheetSource.objects.exists())
+        folder.refresh_from_db();self.assertIsNone(folder.last_success)
+    def test_multiple_weekly_sources_are_unified_without_erasing_previous_week(self):
+        from openpyxl import Workbook
+        from .sheets import sync_workbook
+        for offset,source in [(0,'week-source-one'),(7,'week-source-two')]:
+            book=Workbook();sheet=book.active;sheet.title='Espelho Semanal'
+            sheet.append([None,(self.start+timedelta(days=offset)).replace(tzinfo=None)])
+            sheet.append([None,'Segunda']);sheet.append(['INSTITUTO','Ambulatório'])
+            sheet.append([None,'R1','8-18','A',None,'Pessoa Um'])
+            sync_workbook(book,source)
+            if offset==7: sync_workbook(book,source)
+        self.assertEqual(Shift.objects.filter(source__startswith='week-source',active=True).count(),2)
+        self.assertEqual(Shift.objects.filter(source__startswith='week-source').values('resident_id').distinct().count(),1)

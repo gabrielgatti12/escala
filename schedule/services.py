@@ -45,6 +45,7 @@ def respond_exchange(user, pk, action):
             offered.wants_exchange = requested.wants_exchange = False
             offered.save(update_fields=['resident','wants_exchange'])
             requested.save(update_fields=['resident','wants_exchange'])
+            ExchangeTopic.objects.filter(shift_id__in=shifts,closed_at__isnull=True).update(closed_at=timezone.now())
             Exchange.objects.filter(status='pending').exclude(pk=pk).filter(Q(offered_id__in=shifts)|Q(requested_id__in=shifts)).update(status='cancelled',resolved_at=timezone.now())
         exchange.status = 'accepted' if action == 'accept' else 'rejected'
     else:
@@ -99,3 +100,51 @@ def respond_allocation(user,pk,action):
     allocation.resolved_at=timezone.now()
     allocation.save(update_fields=['status','resolved_at'])
     return allocation
+
+from .models import ExchangeTopic, ForumComment
+
+@transaction.atomic
+def set_exchange_interest(user,shift_id,desired=None):
+    shift=Shift.objects.select_for_update().get(pk=shift_id)
+    if shift.resident_id!=user.pk:
+        raise ValidationError('Somente o titular pode publicar este plantão.')
+    if not shift.active or shift.starts_at<=timezone.now():
+        raise ValidationError('Somente plantões futuros e definidos podem ser publicados.')
+    publish=not shift.wants_exchange if desired is None else desired
+    topic=None
+    if publish:
+        ExchangeTopic.objects.filter(shift=shift,closed_at__isnull=True).exclude(poster=user).update(closed_at=timezone.now())
+        topic,_=ExchangeTopic.objects.get_or_create(shift=shift,closed_at__isnull=True,defaults={'poster':user})
+    else:
+        ExchangeTopic.objects.filter(shift=shift,closed_at__isnull=True).update(closed_at=timezone.now())
+    shift.wants_exchange=publish
+    shift.save(update_fields=['wants_exchange'])
+    return topic
+
+@transaction.atomic
+def add_forum_comment(user,topic_id,text):
+    topic=ExchangeTopic.objects.get(pk=topic_id)
+    shift=Shift.objects.select_for_update().get(pk=topic.shift_id)
+    topic=ExchangeTopic.objects.select_for_update().get(pk=topic_id)
+    topic.shift=shift
+    if not topic.is_open:
+        raise ValidationError('Esta publicação está encerrada ou o plantão não está mais disponível.')
+    text=text.strip()
+    if not text or len(text)>600:
+        raise ValidationError('Escreva um comentário entre 1 e 600 caracteres.')
+    return ForumComment.objects.create(topic=topic,author=user,text=text)
+
+@transaction.atomic
+def withdraw_forum_topic(user,topic_id):
+    topic=ExchangeTopic.objects.get(pk=topic_id)
+    shift=Shift.objects.select_for_update().get(pk=topic.shift_id)
+    topic=ExchangeTopic.objects.select_for_update().get(pk=topic_id)
+    if topic.poster_id!=user.pk:
+        raise ValidationError('Somente o autor pode retirar esta publicação.')
+    if topic.closed_at is not None: return topic
+    if shift.resident_id==user.pk:
+        shift.wants_exchange=False
+        shift.save(update_fields=['wants_exchange'])
+    topic.closed_at=timezone.now()
+    topic.save(update_fields=['closed_at'])
+    return topic

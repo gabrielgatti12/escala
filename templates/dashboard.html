@@ -25,7 +25,7 @@
     <a class="stat stat-link" href="?tab=exchanges"><div><span class="stat-label">Aguardando seu aceite</span><strong>{{ received_count|stringformat:'02d' }}</strong><small>{% if received_count %}Veja as solicitações recebidas{% else %}Tudo em dia por aqui{% endif %}</small></div><span class="stat-icon violet">{% include 'components/icon.html' with name='swap' %}</span></a>
   </div>
   {% include 'components/week.html' %}
-  {% if received_count %}{% include 'components/requests.html' with compact=True %}{% else %}<div class="bottom-tip"><span class="tile-icon small teal">{% include 'components/icon.html' with name='swap' %}</span><div><strong>Precisa ajustar a semana?</strong><p>Abra um plantão para sinalizar interesse ou propor uma troca com um colega.</p></div><a href="?tab=exchanges">Ver trocas {% include 'components/icon.html' with name='arrow' %}</a></div>{% endif %}
+  {% if received_count %}{% include 'components/requests.html' with compact=True %}{% else %}<div class="bottom-tip"><span class="tile-icon small teal">{% include 'components/icon.html' with name='swap' %}</span><div><strong>Precisa ajustar a semana?</strong><p>Marque “Quero trocar” em um plantão para publicar sua intenção no mural.</p></div><a href="{% url 'forum' %}">Abrir mural {% include 'components/icon.html' with name='arrow' %}</a></div>{% endif %}
 {% endif %}
 <footer class="page-footer"><span><span class="status-dot"></span>{% if latest_sync %}Última sincronização {{ latest_sync.last_success|date:'d/m · H:i' }}{% else %}Aguardando a primeira sincronização{% endif %}</span><a href="{% url 'calendar_ics' %}">{% include 'components/icon.html' with name='download' %} Exportar minha escala</a></footer>
 {% include 'components/exchange_dialog.html' %}

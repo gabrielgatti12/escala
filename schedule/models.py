@@ -109,3 +109,23 @@ class SheetSource(models.Model):
     enabled = models.BooleanField(default=True)
     error = models.CharField(max_length=250,blank=True)
     def __str__(self): return self.name or self.spreadsheet_id
+
+class ExchangeTopic(models.Model):
+    shift = models.ForeignKey(Shift,on_delete=models.PROTECT,related_name='exchange_topics')
+    poster = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,related_name='forum_topics')
+    published_at = models.DateTimeField(auto_now_add=True)
+    closed_at = models.DateTimeField(null=True,blank=True)
+    class Meta:
+        ordering=['-published_at','-pk']
+        constraints=[models.UniqueConstraint(fields=['shift'],condition=models.Q(closed_at__isnull=True),name='one_open_exchange_topic_per_shift')]
+    @property
+    def is_open(self):
+        return self.closed_at is None and self.shift.active and self.shift.wants_exchange and self.shift.resident_id==self.poster_id and self.shift.starts_at>timezone.now()
+
+class ForumComment(models.Model):
+    topic = models.ForeignKey(ExchangeTopic,on_delete=models.CASCADE,related_name='comments')
+    author = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,related_name='forum_comments')
+    text = models.CharField(max_length=600)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        ordering=['created_at','pk']

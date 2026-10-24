@@ -58,3 +58,11 @@ A dupla decide a divisão entre si, pelo fluxo de proposta e aceite no aplicativ
 A página inicial abre na semana do próximo plantão, mantendo a seleção explícita quando informada. A navegação separa Minha escala, Escala dos colegas, Trocas e divisões, Calendário mensal e Planilhas e fontes (administrador). Os cartões distinguem plantões definidos, duplas pendentes e horários não informados. O botão Solicitar troca permite escolher os dois plantões; o atalho no cartão preenche o plantão escolhido. A divisão filtra atividades da mesma dupla e data, com validação final no servidor.
 
 Em Planilhas e fontes, o administrador pode cadastrar uma semana pelo link Google Sheets. O trabalhador importa no próximo ciclo e preserva as semanas anteriores. Novas fontes sem nome recebem um título derivado das datas reais do espelho. Os estilos e scripts estão em `static/schedule/`, com `STATICFILES_DIRS` configurado; `collectstatic` gera os arquivos versionados na imagem de produção.
+
+## Mural de trocas
+
+“Quero trocar” publica automaticamente uma intenção no mural autenticado, visível a todos os residentes. Cada publicação permite comentários de até 600 caracteres e uma proposta formal pelo botão Propor uma troca. Comentários não alteram a escala. A confirmação dos dois continua obrigatória; uma troca aceita encerra as publicações dos plantões envolvidos. O autor pode retirar a publicação, mantendo a conversa no histórico de Minhas publicações.
+
+O mural mostra por padrão somente plantões futuros, ativos e ainda pertencentes ao autor. Publicações vencidas, retiradas ou com titularidade alterada não aceitam novos comentários. Uma nova publicação após mudança de titular cria uma conversa separada, preservando a anterior. A migração inclui intenções futuras que já estavam marcadas antes da introdução do mural. A autenticação e o vínculo do residente são usados no servidor para autoria e permissões; valores de autor enviados pelo navegador não são aceitos.
+
+O percurso publicar → comentar → propor → aceitar → atualizar calendários foi validado no navegador com duas contas fictícias, removidas após o teste. Não foram criadas publicações de teste nas escalas reais.

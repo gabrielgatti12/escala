@@ -4,6 +4,7 @@ from .models import Shift,Exchange
 class ShiftAdmin(admin.ModelAdmin):
     list_display = ['external_id','resident','starts_at','ends_at','sector']
     list_filter = ['sector','resident']
+    readonly_fields = ['wants_exchange']
 @admin.register(Exchange)
 class ExchangeAdmin(admin.ModelAdmin):
     list_display = ['proposer','recipient','offered','requested','status','created_at']
@@ -46,3 +47,17 @@ class SheetSourceAdmin(admin.ModelAdmin):
 @admin.register(IncompleteActivity)
 class IncompleteActivityAdmin(admin.ModelAdmin):
     list_display=['date','sector','source_cell','raw_time']
+
+from .models import ExchangeTopic,ForumComment
+@admin.register(ExchangeTopic)
+class ExchangeTopicAdmin(admin.ModelAdmin):
+    list_display=['poster','shift','published_at','closed_at']
+    def has_add_permission(self,request): return False
+    def has_change_permission(self,request,obj=None): return False
+    def has_delete_permission(self,request,obj=None): return False
+@admin.register(ForumComment)
+class ForumCommentAdmin(admin.ModelAdmin):
+    list_display=['author','topic','created_at']
+    readonly_fields=['author','topic','text','created_at']
+    def has_add_permission(self,request): return False
+    def has_change_permission(self,request,obj=None): return False

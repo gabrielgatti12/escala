@@ -352,3 +352,132 @@ class WorkflowTests(TestCase):
         with patch('schedule.management.commands.sync_sheets.fetch_workbook',return_value=book):
             call_command('sync_sheets','a'*30)
         self.assertEqual(SheetSource.objects.get().name,'Semana de 26/10 a 01/11/2026')
+    def test_interest_publishes_one_topic_and_redirects_to_forum(self):
+        from .models import ExchangeTopic
+        from .services import set_exchange_interest
+        self.client.force_login(self.a)
+        response=self.client.post(f'/plantoes/{self.s1.pk}/interesse/')
+        topic=ExchangeTopic.objects.get()
+        self.assertRedirects(response,f'/mural/{topic.pk}/')
+        self.assertEqual(topic.poster,self.a)
+        self.assertEqual(set_exchange_interest(self.a,self.s1.pk,True).pk,topic.pk)
+        self.assertEqual(ExchangeTopic.objects.count(),1)
+        self.client.force_login(self.b)
+        self.assertContains(self.client.get('/mural/'),'UTI')
+        self.assertContains(self.client.get(f'/mural/{topic.pk}/'),'Propor uma troca')
+    def test_forum_requires_authentication(self):
+        self.assertEqual(self.client.get('/mural/').status_code,302)
+    def test_forum_comments_are_visible_and_html_is_escaped(self):
+        from .services import set_exchange_interest
+        from .models import ForumComment
+        topic=set_exchange_interest(self.a,self.s1.pk,True)
+        self.client.force_login(self.b)
+        text='<script>alert(1)</script> Consigo trocar na quarta.'
+        response=self.client.post(f'/mural/{topic.pk}/comentar/',{'text':text,'author':self.c.pk})
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(ForumComment.objects.get().author,self.b)
+        response=self.client.get(f'/mural/{topic.pk}/')
+        self.assertContains(response,'&lt;script&gt;alert(1)&lt;/script&gt;')
+        self.assertNotContains(response,'<script>alert(1)</script>')
+        self.client.force_login(self.c)
+        self.assertContains(self.client.get(f'/mural/{topic.pk}/'),'Consigo trocar na quarta.')
+    def test_blank_and_oversized_comments_are_rejected(self):
+        from .services import set_exchange_interest,add_forum_comment
+        from .models import ForumComment
+        topic=set_exchange_interest(self.a,self.s1.pk,True)
+        for text in ['   ','x'*601]:
+            with self.assertRaises(ValidationError): add_forum_comment(self.b,topic.pk,text)
+        self.assertEqual(ForumComment.objects.count(),0)
+    def test_withdraw_is_owner_only_and_preserves_comments(self):
+        from .services import set_exchange_interest,add_forum_comment,withdraw_forum_topic
+        from .models import ForumComment
+        topic=set_exchange_interest(self.a,self.s1.pk,True)
+        add_forum_comment(self.b,topic.pk,'Tenho interesse.')
+        self.client.force_login(self.b)
+        self.assertEqual(self.client.post(f'/mural/{topic.pk}/retirar/').status_code,404)
+        withdraw_forum_topic(self.a,topic.pk);withdraw_forum_topic(self.a,topic.pk)
+        self.s1.refresh_from_db();topic.refresh_from_db()
+        self.assertFalse(self.s1.wants_exchange);self.assertIsNotNone(topic.closed_at)
+        self.assertEqual(ForumComment.objects.count(),1)
+        with self.assertRaises(ValidationError): add_forum_comment(self.b,topic.pk,'Novo comentário')
+        self.client.force_login(self.a)
+        self.assertContains(self.client.get('/mural/?mine=1'),'Encerrado')
+        self.assertNotContains(self.client.get('/mural/'),f'href="/mural/{topic.pk}/"')
+    def test_accepted_exchange_closes_both_forum_topics(self):
+        from .services import set_exchange_interest
+        from .models import ExchangeTopic
+        first=set_exchange_interest(self.a,self.s1.pk,True)
+        second=set_exchange_interest(self.b,self.s2.pk,True)
+        respond_exchange(self.b,self.propose().pk,'accept')
+        self.assertEqual(ExchangeTopic.objects.filter(closed_at__isnull=False).count(),2)
+        first.refresh_from_db();second.refresh_from_db()
+        self.assertFalse(first.is_open);self.assertFalse(second.is_open)
+        self.client.force_login(self.c)
+        response=self.client.get('/mural/')
+        self.assertNotContains(response,f'href="/mural/{first.pk}/"')
+        self.assertNotContains(response,f'href="/mural/{second.pk}/"')
+    def test_stale_or_expired_forum_topics_cannot_receive_comments(self):
+        from .services import set_exchange_interest,add_forum_comment
+        topic=set_exchange_interest(self.a,self.s1.pk,True)
+        self.s1.active=False;self.s1.save()
+        with self.assertRaises(ValidationError): add_forum_comment(self.b,topic.pk,'Posso trocar')
+        self.client.force_login(self.b)
+        self.assertNotContains(self.client.get('/mural/'),f'href="/mural/{topic.pk}/"')
+    def test_forum_uses_linked_resident_for_comments(self):
+        from .services import set_exchange_interest
+        from .models import ResidentAccess,ForumComment
+        topic=set_exchange_interest(self.a,self.s1.pk,True)
+        admin=get_user_model().objects.create_superuser('forum-admin',password='test-only-password')
+        ResidentAccess.objects.create(account=admin,resident=self.b)
+        self.client.force_login(admin)
+        self.client.post(f'/mural/{topic.pk}/comentar/',{'text':'Quero combinar.'})
+        self.assertEqual(ForumComment.objects.get().author,self.b)
+    def test_existing_interests_can_be_migrated_to_topics_without_duplicates(self):
+        from importlib import import_module
+        from django.apps import apps
+        from django.db import connection
+        from unittest.mock import Mock
+        from .models import ExchangeTopic
+        self.s1.wants_exchange=True;self.s1.save()
+        migration=import_module('schedule.migrations.0010_seed_exchange_topics')
+        editor=Mock();editor.connection.alias=connection.alias
+        migration.seed_topics(apps,editor);migration.seed_topics(apps,editor)
+        self.assertEqual(ExchangeTopic.objects.count(),1)
+        self.assertEqual(ExchangeTopic.objects.get().poster,self.a)
+    def test_new_owner_gets_new_forum_thread_after_exchange(self):
+        from .services import set_exchange_interest,add_forum_comment
+        from .models import ForumComment
+        original=set_exchange_interest(self.a,self.s1.pk,True)
+        add_forum_comment(self.c,original.pk,'Conversa anterior.')
+        respond_exchange(self.b,self.propose().pk,'accept')
+        new=set_exchange_interest(self.b,self.s1.pk,True)
+        self.assertNotEqual(new.pk,original.pk)
+        self.assertEqual(new.poster,self.b)
+        self.assertEqual(ForumComment.objects.filter(topic=new).count(),0)
+        self.assertEqual(ForumComment.objects.filter(topic=original).count(),1)
+    def test_failed_acceptance_keeps_forum_publication_open(self):
+        from .services import set_exchange_interest
+        topic=set_exchange_interest(self.a,self.s1.pk,True)
+        exchange=self.propose()
+        Shift.objects.create(external_id='forum-conflict',resident=self.b,starts_at=self.s1.starts_at,ends_at=self.s1.ends_at,sector='Conflito')
+        with self.assertRaises(ValidationError): respond_exchange(self.b,exchange.pk,'accept')
+        topic.refresh_from_db();self.s1.refresh_from_db();exchange.refresh_from_db()
+        self.assertTrue(topic.is_open)
+        self.assertTrue(self.s1.wants_exchange)
+        self.assertEqual(exchange.status,'pending')
+    def test_reimport_preserves_an_existing_forum_thread(self):
+        from openpyxl import Workbook
+        from .sheets import sync_workbook
+        from .services import set_exchange_interest
+        from .models import ExchangeTopic
+        book=Workbook();sheet=book.active;sheet.title='Espelho Semanal'
+        sheet.append([None,self.start.replace(tzinfo=None)])
+        sheet.append([None,'Segunda']);sheet.append(['INSTITUTO','Ambulatório'])
+        sheet.append([None,'R1','8-18','A',None,'Pessoa de teste'])
+        sync_workbook(book,'forum-source')
+        shift=Shift.objects.get(source='forum-source')
+        topic=set_exchange_interest(shift.resident,shift.pk,True)
+        sync_workbook(book,'forum-source')
+        topic.refresh_from_db()
+        self.assertTrue(topic.is_open)
+        self.assertEqual(ExchangeTopic.objects.count(),1)

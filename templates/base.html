@@ -32,6 +32,7 @@
   <nav class="main-nav" aria-label="Navegação principal">
     <a href="{% url 'dashboard' %}?scope=mine" class="{% if tab == 'week' and scope == 'mine' %}active{% endif %}">{% include 'components/icon.html' with name='calendar' %}<span>Minha escala</span></a>
     <a href="{% url 'dashboard' %}?scope=all" class="{% if tab == 'week' and scope == 'all' %}active{% endif %}">{% include 'components/icon.html' with name='users' %}<span>Escala dos colegas</span></a>
+    <a href="{% url 'forum' %}" class="{% if tab == 'forum' %}active{% endif %}">{% include 'components/icon.html' with name='swap' %}<span>Mural de trocas</span></a>
     <a href="{% url 'dashboard' %}?tab=exchanges" class="{% if tab == 'exchanges' %}active{% endif %}">{% include 'components/icon.html' with name='swap' %}<span>Trocas e divisões</span>{% if received_count %}<span class="nav-count">{{ received_count }}</span>{% endif %}</a>
     <a href="{% url 'calendar' %}" class="{% if request.resolver_match.url_name == 'calendar' %}active{% endif %}">{% include 'components/icon.html' with name='grid' %}<span>Calendário mensal</span></a>
     {% if user.is_superuser %}<div class="nav-label secondary-label">GERENCIAR</div><a href="{% url 'dashboard' %}?tab=sources" class="{% if tab == 'sources' %}active{% endif %}">{% include 'components/icon.html' with name='source' %}<span>Planilhas e fontes</span></a>{% endif %}

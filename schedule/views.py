@@ -108,9 +108,17 @@ def respond(request,pk,action):
 @login_required
 @require_POST
 def toggle_interest(request, pk):
-    shift = get_object_or_404(Shift, pk=pk,resident=resident_for_account(request.user),active=True,starts_at__gt=timezone.now())
-    shift.wants_exchange = not shift.wants_exchange
-    shift.save(update_fields=['wants_exchange'])
+    person=resident_for_account(request.user)
+    get_object_or_404(Shift,pk=pk,resident=person,active=True,starts_at__gt=timezone.now())
+    from .services import set_exchange_interest
+    try:
+        topic=set_exchange_interest(person,pk)
+        if topic:
+            messages.success(request,'Publicado no mural! Todos os residentes podem ver e propor uma troca.')
+            return redirect('forum_topic',pk=topic.pk)
+        messages.success(request,'Interesse retirado do mural.')
+    except ValidationError as error:
+        messages.error(request,'; '.join(error.messages))
     return redirect('dashboard')
 
 @login_required
@@ -218,3 +226,65 @@ def register_source(request):
             source.enabled=True;source.save(update_fields=['enabled'])
         messages.success(request,'Planilha cadastrada. A sincronização acontece no próximo ciclo, em até 5 minutos.')
     return redirect('/?tab=sources')
+
+
+def forum_exchange_context(person):
+    future=Shift.objects.filter(active=True,starts_at__gt=timezone.now()).select_related('resident')
+    return {'resident_user':person,'tab':'forum','offered':future.filter(resident=person),'requested':future.exclude(resident=person),'future_count':future.count(),'has_offered':future.filter(resident=person).exists(),'has_requested':future.exclude(resident=person).exists()}
+
+@login_required
+def forum(request):
+    from django.core.paginator import Paginator
+    from django.db.models import F,Count
+    from .models import ExchangeTopic
+    person=resident_for_account(request.user)
+    open_topics=ExchangeTopic.objects.filter(closed_at__isnull=True,shift__active=True,shift__wants_exchange=True,shift__starts_at__gt=timezone.now(),poster_id=F('shift__resident_id'))
+    mine=request.GET.get('mine')=='1'
+    topics=ExchangeTopic.objects.filter(poster=person) if mine else open_topics
+    sector=request.GET.get('sector','')
+    if sector: topics=topics.filter(shift__sector=sector)
+    shift_id=request.GET.get('shift','')
+    if shift_id.isdigit(): topics=topics.filter(shift_id=int(shift_id))
+    context=forum_exchange_context(person)
+    context.update({'topics':Paginator(topics.select_related('poster','shift__resident').annotate(comment_count=Count('comments')).order_by('-published_at','-pk'),12).get_page(request.GET.get('page')),'mine':mine,'open_count':open_topics.count(),'own_count':open_topics.filter(poster=person).count(),'sectors':open_topics.order_by('shift__sector').values_list('shift__sector',flat=True).distinct()})
+    return render(request,'forum.html',context)
+
+@login_required
+def forum_topic(request,pk):
+    from django.core.paginator import Paginator
+    from .models import ExchangeTopic
+    topic=get_object_or_404(ExchangeTopic.objects.select_related('poster','shift__resident'),pk=pk)
+    person=resident_for_account(request.user)
+    context=forum_exchange_context(person)
+    context.update({'topic':topic,'topic_open':topic.is_open,'comments':Paginator(topic.comments.select_related('author'),30).get_page(request.GET.get('page'))})
+    return render(request,'forum_topic.html',context)
+
+@login_required
+@require_POST
+def forum_comment(request,pk):
+    from .models import ExchangeTopic
+    from .services import add_forum_comment
+    get_object_or_404(ExchangeTopic,pk=pk)
+    try:
+        comment=add_forum_comment(resident_for_account(request.user),pk,request.POST.get('text',''))
+        messages.success(request,'Comentário publicado.')
+        from django.urls import reverse
+        page=(comment.topic.comments.count()+29)//30
+        return redirect(reverse('forum_topic',args=[pk])+f'?page={page}#comment-{comment.pk}')
+    except ValidationError as error:
+        messages.error(request,'; '.join(error.messages))
+    return redirect('forum_topic',pk=pk)
+
+@login_required
+@require_POST
+def forum_withdraw(request,pk):
+    from .models import ExchangeTopic
+    from .services import withdraw_forum_topic
+    person=resident_for_account(request.user)
+    get_object_or_404(ExchangeTopic,pk=pk,poster=person)
+    try:
+        withdraw_forum_topic(person,pk)
+        messages.success(request,'Publicação encerrada. O histórico da conversa foi mantido.')
+    except ValidationError as error:
+        messages.error(request,'; '.join(error.messages))
+    return redirect('forum_topic',pk=pk)

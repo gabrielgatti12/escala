@@ -12,11 +12,24 @@ SHEET_MIME='application/vnd.google-apps.spreadsheet'
 API='https://www.googleapis.com/drive/v3'
 
 def authenticated_session():
+    key_path=os.environ.get('GOOGLE_DRIVE_API_KEY_FILE','')
+    if key_path:
+        with open(key_path) as stream: key=stream.read().strip()
+    else:
+        key=os.environ.get('GOOGLE_DRIVE_API_KEY','').strip()
+    if key_path and not key:
+        raise ValueError('O arquivo da chave de API está vazio.')
+    if key:
+        from requests import Session
+        session=Session()
+        session.params['key']=key
+        session.public_drive=True
+        return session
     from google.oauth2.service_account import Credentials
     from google.auth.transport.requests import AuthorizedSession
     path=os.environ.get('GOOGLE_APPLICATION_CREDENTIALS','')
     if not path:
-        raise ValueError('Configure o arquivo de credencial de leitura do Google Drive na instância.')
+        raise ValueError('Configure uma chave de API para a pasta pública ou uma credencial de leitura do Google Drive na instância.')
     credentials=Credentials.from_service_account_file(path,scopes=['https://www.googleapis.com/auth/drive.readonly'])
     return AuthorizedSession(credentials)
 

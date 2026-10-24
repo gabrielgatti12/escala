@@ -6,3 +6,4 @@ __pycache__/
 staticfiles/
 deploy/.env
 deploy/google-service-account.json
+deploy/google-drive-api-key.txt

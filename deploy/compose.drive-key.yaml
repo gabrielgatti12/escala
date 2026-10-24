@@ -1,0 +1,10 @@
+# Optional: public folders can be listed with a restricted Google Drive API key.
+services:
+  sync:
+    environment:
+      GOOGLE_DRIVE_API_KEY_FILE: /run/secrets/google_drive_api_key
+    secrets:
+      - google_drive_api_key
+secrets:
+  google_drive_api_key:
+    file: ./google-drive-api-key.txt

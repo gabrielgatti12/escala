@@ -501,3 +501,31 @@ class WorkflowTests(TestCase):
         commented=data_revision();self.assertNotEqual(published,commented)
         respond_exchange(self.b,self.propose().pk,'accept')
         self.assertNotEqual(commented,data_revision())
+    def test_public_drive_uses_key_file_without_service_account(self):
+        from unittest.mock import patch
+        from .drive import authenticated_session
+        with TemporaryDirectory() as folder:
+            path=Path(folder)/'api-key.txt';path.write_text('test-key-not-a-real-credential\n')
+            with patch.dict('os.environ',{'GOOGLE_DRIVE_API_KEY_FILE':str(path),'GOOGLE_APPLICATION_CREDENTIALS':'/not-needed.json'}):
+                session=authenticated_session()
+                try:
+                    self.assertTrue(session.public_drive)
+                    self.assertEqual(session.params['key'],'test-key-not-a-real-credential')
+                    self.assertTrue(session.verify)
+                finally: session.close()
+    def test_public_folder_sync_uses_public_sheet_export(self):
+        from unittest.mock import patch,Mock
+        from openpyxl import Workbook
+        from .models import DriveFolder,SheetSource
+        folder=DriveFolder.objects.create(folder_id='rootfolder0001')
+        SheetSource.objects.create(spreadsheet_id='b'*30,folder=folder)
+        book=Workbook();sheet=book.active;sheet.title='Espelho Semanal'
+        sheet.append([None,self.start.replace(tzinfo=None)])
+        sheet.append([None,'Segunda']);sheet.append(['INSTITUTO','Ambulatório'])
+        sheet.append([None,'R1','8-18','A',None,'Pessoa Um'])
+        session=Mock();session.public_drive=True
+        with patch('schedule.drive.authenticated_session',return_value=session),patch('schedule.drive.discover_folder',return_value=1),patch('schedule.management.commands.sync_sheets.fetch_workbook',return_value=book) as public_export,patch('schedule.drive.fetch_private_workbook') as private_export:
+            call_command('sync_sheets',registered=True)
+            public_export.assert_called_once_with('b'*30)
+            private_export.assert_not_called()
+        self.assertEqual(Shift.objects.filter(source='b'*30,active=True).count(),1)

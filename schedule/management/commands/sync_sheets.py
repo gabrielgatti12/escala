@@ -33,7 +33,7 @@ class Command(BaseCommand):
                                 folder.save(update_fields=['error'])
                                 self.stderr.write(folder.error)
                     except Exception as error:
-                        folders.update(error=f'Credencial Drive indisponível ({type(error).__name__}). Configure o arquivo de credencial de leitura na instância.')
+                        folders.update(error=f'Acesso Drive indisponível ({type(error).__name__}). Configure a chave de API para a pasta pública ou a credencial de leitura na instância.')
                         self.stderr.write('Pastas do Drive ainda não acessíveis; continuando com as fontes conhecidas.')
                 failures=0
                 for source in SheetSource.objects.filter(enabled=True):
@@ -43,8 +43,11 @@ class Command(BaseCommand):
                             if session is None:
                                 from schedule.drive import authenticated_session
                                 session=authenticated_session()
-                            from schedule.drive import fetch_private_workbook
-                            book=fetch_private_workbook(session,source.spreadsheet_id)
+                            if getattr(session,'public_drive',False):
+                                book=fetch_workbook(source.spreadsheet_id)
+                            else:
+                                from schedule.drive import fetch_private_workbook
+                                book=fetch_private_workbook(session,source.spreadsheet_id)
                         else:
                             book=fetch_workbook(source.spreadsheet_id)
                         summary=sync_workbook(book,source.spreadsheet_id)

@@ -38,7 +38,14 @@ Esta configuração usa SQLite com apenas um processo web, adequada para avalia�
 
 A sincronização mantém um cadastro de fontes (`SheetSource`) e importa todas as fontes ativas para o mesmo calendário. Novas semanas são adicionadas sem apagar as semanas anteriores. Fontes desativadas pelo administrador não são reativadas pela descoberta. Exclusões ou mudanças de acesso no Drive não apagam automaticamente o histórico local.
 
-Para descobrir automaticamente a pasta principal e suas subpastas mensais:
+Para uma pasta pública que também abre sem login, use uma chave de API restrita, sem conta de serviço:
+
+1. Ative a Google Drive API, crie uma chave em APIs e serviços → Credenciais e restrinja-a à Google Drive API e ao IP público de saída da instância Oracle.
+2. Guarde somente o valor da chave em `deploy/google-drive-api-key.txt` na instância. Não envie o valor ao chat, não registre em comandos com eco e não inclua no Git. Configure proprietário root, grupo numérico 10001 e modo 640 para o trabalhador conseguir ler o secret.
+3. Cadastre o ID da pasta principal em Drive folders, no administrador. Use `bash scripts/oracle-compose.sh ...`; o script inclui automaticamente `deploy/compose.drive-key.yaml` quando esse arquivo privado está presente. A chave é montada apenas no trabalhador.
+4. A listagem usa a API; as planilhas públicas usam a exportação HTTPS de leitura já validada. A listagem real via API precisa ser validada após fornecer a chave, pois os testes locais usam uma chave fictícia e respostas simuladas.
+
+Para pastas privadas compartilhadas explicitamente com uma conta de serviço, a alternativa é:
 
 1. Habilite a Google Drive API em um projeto Google Cloud e crie uma conta de serviço. Compartilhe **somente a pasta de escalas** com o e-mail dessa conta, como **Leitor**. A integração usa o escopo `drive.readonly`.
 2. Guarde a credencial JSON na instância como `deploy/google-service-account.json`, fora do Git e da imagem Docker. Não envie seu conteúdo ao chat. Configure permissão de leitura apenas para o operador e o UID 10001 do contêiner (por exemplo, proprietário root, grupo 10001 e modo 640). O arquivo é montado somente no trabalhador de sincronização, como secret de leitura.
@@ -51,12 +58,12 @@ docker compose -f deploy/compose.yaml -f deploy/compose.drive.yaml up -d
 
 A pasta será reexaminada a cada intervalo; todas as páginas da listagem são percorridas, com limites explícitos de 1000 pastas e 10000 planilhas. A descoberta só é salva após terminar sem erros. Somente arquivos nativos Google Sheets são descobertos; backups XLSX não são importados em duplicidade.
 
-Sem credencial Drive, planilhas públicas cadastradas individualmente por ID continuam funcionando. O link de uma pasta, sozinho, não autentica a API de listagem. A descoberta real deve ser validada após configurar a credencial na instância; testes locais simulam a paginação e as respostas da API, sem provar acesso à pasta real.
+Sem credencial Drive, planilhas públicas cadastradas individualmente por ID continuam funcionando. A API de listagem exige uma chave de API para a pasta pública ou uma credencial autenticada para a pasta privada. A descoberta real deve ser validada após configurar a credencial na instância; testes locais simulam a paginação e as respostas da API, sem provar acesso à pasta real.
 
 
 ## Operação diária e atualizações
 
-Use `bash scripts/oracle-compose.sh` no lugar do prefixo `docker compose -f deploy/compose.yaml`. O script acrescenta o complemento Drive automaticamente se a credencial privada estiver presente. Exemplos:
+Use `bash scripts/oracle-compose.sh` no lugar do prefixo `docker compose -f deploy/compose.yaml`. O script acrescenta o complemento correspondente automaticamente se a chave de API ou a credencial de conta de serviço estiver presente. Exemplos:
 
 ```bash
 bash scripts/oracle-compose.sh build

@@ -1,10 +1,10 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="page-heading">
-  <div><div class="eyebrow">{% if tab == 'exchanges' %}COMBINE COM SEUS COLEGAS{% elif tab == 'sources' %}TUDO EM UM SÓ CALENDÁRIO{% else %}SUA SEMANA, COM CLAREZA{% endif %}</div>
-  <h1>{% if tab == 'exchanges' %}Trocas e divisões{% elif tab == 'sources' %}Planilhas e fontes{% elif scope == 'all' %}Escala dos colegas{% else %}Minha escala{% endif %}</h1>
-  <p class="muted">{% if tab == 'exchanges' %}Proponha, confirme e acompanhe cada combinação.{% elif tab == 'sources' %}Reúna as semanas e acompanhe a atualização de cada planilha.{% else %}{{ resident_user.get_full_name|default:resident_user.username }} · Seu tempo organizado, do plantão à troca.{% endif %}</p></div>
-  {% if tab != 'sources' %}<button type="button" class="button primary" data-open-exchange>{% include 'components/icon.html' with name='swap' %}Solicitar troca</button>{% endif %}
+  <div><div class="eyebrow">{% if tab == 'requests' %}COMBINE COM SEUS COLEGAS{% elif tab == 'accounts' %}ACESSO INDIVIDUAL{% elif tab == 'sources' %}TUDO EM UM SÓ CALENDÁRIO{% else %}SUA SEMANA, COM CLAREZA{% endif %}</div>
+  <h1>{% if tab == 'requests' %}Solicitações{% elif tab == 'accounts' %}Contas e acessos{% elif tab == 'sources' %}Planilhas e fontes{% elif scope == 'all' %}Escala dos colegas{% else %}Minha escala{% endif %}</h1>
+  <p class="muted">{% if tab == 'requests' %}Proponha, confirme e acompanhe cada combinação.{% elif tab == 'accounts' %}Cada residente com seu usuário, senha e solicitações.{% elif tab == 'sources' %}Reúna as semanas e acompanhe a atualização de cada planilha.{% else %}{{ resident_user.get_full_name|default:resident_user.username }} · Seu tempo organizado, do plantão à troca.{% endif %}</p></div>
+  {% if tab != 'sources' and tab != 'accounts' %}<button type="button" class="button primary" data-open-exchange>{% include 'components/icon.html' with name='swap' %}Solicitar troca</button>{% endif %}
 </div>
 {% if user.is_superuser %}
 <details class="identity-box" {% if not linked %}open{% endif %}>
@@ -12,9 +12,12 @@
   <p class="muted">Vincule sua conta ao seu próprio nome na planilha para visualizar seus plantões e propor trocas. Seu acesso administrativo será mantido.</p>
   <form class="inline-fields" method="post" action="{% url 'link_resident' %}">{% csrf_token %}<label>Meu nome na planilha<select name="resident" required><option value="">Selecione seu nome</option>{% for person in resident_choices %}<option value="{{ person.pk }}" {% if person.pk == resident_user.pk %}selected{% endif %}>{{ person.get_full_name|default:person.username }}</option>{% endfor %}</select></label><button class="button primary">Vincular minha conta</button></form>
 </details>{% endif %}
-{% if tab == 'sources' %}
+{% if tab == 'accounts' %}
+  {% include 'components/accounts.html' %}
+{% elif tab == 'sources' %}
   {% include 'components/sources.html' %}
-{% elif tab == 'exchanges' %}
+{% elif tab == 'requests' %}
+  {% include 'components/request_tabs.html' %}
   <div class="action-grid"><div class="action-tile"><span class="tile-icon teal">{% include 'components/icon.html' with name='swap' %}</span><h2>Trocar um plantão</h2><p class="muted">Escolha um dos seus plantões e o que gostaria de assumir. O colega confirma a outra parte.</p><button class="button primary" data-open-exchange>Propor troca {% include 'components/icon.html' with name='arrow' %}</button></div><div class="action-tile"><span class="tile-icon amber">{% include 'components/icon.html' with name='users' %}</span><h2>Dividir atividades da dupla</h2><p class="muted">Definam quem ficará em cada atividade. As atribuições entram no calendário após os dois aceitarem.</p><button class="button secondary" data-open-allocation>Combinar divisão {% include 'components/icon.html' with name='arrow' %}</button></div></div>
   {% include 'components/requests.html' %}
   {% include 'components/allocations.html' %}
@@ -22,12 +25,12 @@
   <div class="stats-grid">
     <div class="stat"><div><span class="stat-label">Meus plantões na semana</span><strong>{{ own_week_count|stringformat:'02d' }}</strong><small>Titularidade definida</small></div><span class="stat-icon teal">{% include 'components/icon.html' with name='calendar' %}</span></div>
     <div class="stat"><div><span class="stat-label">Atividades a combinar</span><strong>{{ own_shared_count|stringformat:'02d' }}</strong><small>Divisão pendente da dupla</small></div><span class="stat-icon amber">{% include 'components/icon.html' with name='users' %}</span></div>
-    <a class="stat stat-link" href="?tab=exchanges"><div><span class="stat-label">Aguardando seu aceite</span><strong>{{ received_count|stringformat:'02d' }}</strong><small>{% if received_count %}Veja as solicitações recebidas{% else %}Tudo em dia por aqui{% endif %}</small></div><span class="stat-icon violet">{% include 'components/icon.html' with name='swap' %}</span></a>
+    <a class="stat stat-link" href="?tab=requests"><div><span class="stat-label">Aguardando seu aceite</span><strong>{{ received_count|stringformat:'02d' }}</strong><small>{% if received_count %}Veja as solicitações recebidas{% else %}Tudo em dia por aqui{% endif %}</small></div><span class="stat-icon violet">{% include 'components/icon.html' with name='swap' %}</span></a>
   </div>
   {% include 'components/week.html' %}
-  {% if received_count %}{% include 'components/requests.html' with compact=True %}{% else %}<div class="bottom-tip"><span class="tile-icon small teal">{% include 'components/icon.html' with name='swap' %}</span><div><strong>Precisa ajustar a semana?</strong><p>Marque “Quero trocar” em um plantão para publicar sua intenção no mural.</p></div><a href="{% url 'forum' %}">Abrir mural {% include 'components/icon.html' with name='arrow' %}</a></div>{% endif %}
+  {% if received_count %}{% include 'components/requests.html' with exchanges=incoming_preview compact=True %}{% else %}<div class="bottom-tip"><span class="tile-icon small teal">{% include 'components/icon.html' with name='swap' %}</span><div><strong>Precisa ajustar a semana?</strong><p>Marque “Quero trocar” em um plantão para publicar sua intenção no mural.</p></div><a href="{% url 'forum' %}">Abrir mural {% include 'components/icon.html' with name='arrow' %}</a></div>{% endif %}
 {% endif %}
 <footer class="page-footer"><span><span class="status-dot"></span>{% if latest_sync %}Última sincronização {{ latest_sync.last_success|date:'d/m · H:i' }}{% else %}Aguardando a primeira sincronização{% endif %}</span><a href="{% url 'calendar_ics' %}">{% include 'components/icon.html' with name='download' %} Exportar minha escala</a></footer>
-{% include 'components/exchange_dialog.html' %}
-{% include 'components/allocation_dialog.html' %}
+{% if tab != 'accounts' and tab != 'sources' %}{% include 'components/exchange_dialog.html' %}
+{% include 'components/allocation_dialog.html' %}{% endif %}
 {% endblock %}

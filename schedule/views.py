@@ -7,9 +7,9 @@ from django.views.decorators.http import require_POST
 from django.utils import timezone
 from .models import Shift,Exchange,RotationActivity,SyncState,SharedActivity,Allocation,IncompleteActivity
 from .services import propose_exchange, respond_exchange
-from .identity import resident_for_account
+from .identity import resident_for_account,operational_residents
 @login_required
-def dashboard(request):
+def dashboard(request,account_form=None):
     from datetime import date,timedelta
     from django.contrib.auth import get_user_model
     from django.db.models import Count,Min,Max
@@ -18,9 +18,10 @@ def dashboard(request):
     person=resident_for_account(request.user)
     now=timezone.now()
     today=timezone.localdate()
-    tab=request.GET.get('tab','week')
-    if tab not in ['week','exchanges','sources']: tab='week'
-    if tab=='sources' and not request.user.is_superuser:
+    tab='accounts' if account_form is not None else request.GET.get('tab','week')
+    if tab=='exchanges':tab='requests'
+    if tab not in ['week','requests','sources','accounts']: tab='week'
+    if tab in ['sources','accounts'] and not request.user.is_superuser:
         return HttpResponseForbidden('Somente o administrador pode gerenciar fontes.')
     scope='all' if request.GET.get('scope')=='all' else 'mine'
     active=Shift.objects.filter(active=True).select_related('resident')
@@ -62,7 +63,7 @@ def dashboard(request):
         day=week_start+timedelta(days=offset)
         shifts=grouped.get(day,[]);unassigned=pending.get(day,[]);no_time=missing.get(day,[])
         days.append({'date':day,'shifts':shifts,'shared':unassigned,'incomplete':no_time,'today':day==today,'weekend':offset>4,'count':len(shifts)+len(unassigned)+len(no_time)})
-    residents=get_user_model().objects.filter(is_active=True).filter(Q(shift__active=True)|Q(sharedactivity__active=True)|Q(incompleteactivity__isnull=False)).distinct().order_by('first_name','username')
+    residents=operational_residents().filter(is_active=True).order_by('first_name','username')
     exchanges=Exchange.objects.filter(Q(proposer=person)|Q(recipient=person)).select_related('offered','requested','proposer','recipient')
     allocations=Allocation.objects.filter(Q(proposer=person)|Q(recipient=person)).select_related('mine','theirs','proposer','recipient').order_by('-created_at')
     pending_count=exchanges.filter(status='pending').count()+allocations.filter(status='pending').count()
@@ -79,13 +80,31 @@ def dashboard(request):
         for source in SheetSource.objects.select_related('folder').all().order_by('name','pk'):
             source_cards.append({'source':source,'state':states.get(source.spreadsheet_id),'count':totals.get(source.spreadsheet_id,0)})
     bounds=active.aggregate(first=Min('starts_at'),last=Max('ends_at'))
+    from .presentation import sector_rows
+    box=request.GET.get('box','received')
+    if box not in ['received','sent','history']:box='received'
+    displayed_exchanges=exchanges;displayed_allocations=allocations
+    if tab=='requests':
+        if box=='history':
+            displayed_exchanges=exchanges.exclude(status='pending');displayed_allocations=allocations.exclude(status='pending')
+        else:
+            role='recipient' if box=='received' else 'proposer'
+            displayed_exchanges=exchanges.filter(status='pending',**{role:person})
+            displayed_allocations=allocations.filter(status='pending',**{role:person})
+    access_accounts=[];direct_accounts=[]
+    if tab=='accounts':
+        from .forms import ResidentAccountForm
+        from .models import ResidentAccess
+        if account_form is None:account_form=ResidentAccountForm()
+        access_accounts=ResidentAccess.objects.select_related('account','resident').order_by('resident__first_name')
+        direct_accounts=operational_residents().filter(is_active=True).exclude(password__startswith='!').order_by('first_name','username')
     return render(request,'dashboard.html',{
-        'tab':tab,'scope':scope,'resident_user':person,'linked':person.pk!=request.user.pk,'resident_choices':residents,'residents':residents,
+        'sector_rows':sector_rows(days),'layout':'day' if request.GET.get('layout')=='day' else 'sector','account_form':account_form,'access_accounts':access_accounts,'direct_accounts':direct_accounts,'box':box,'sent_count':exchanges.filter(status='pending',proposer=person).count()+allocations.filter(status='pending',proposer=person).count(),'incoming_preview':exchanges.filter(status='pending',recipient=person)[:4],'tab':tab,'scope':scope,'resident_user':person,'linked':person.pk!=request.user.pk,'resident_choices':residents,'residents':residents,
         'days':days,'week_start':week_start,'week_last':week_next-timedelta(days=1),'week_previous':week_start-timedelta(days=7),'week_next':week_next,'today':today,'now':now,
         'own_week_count':own_week_count,'own_shared_count':own_shared_count,'pending_count':pending_count,'received_count':received_count,
         'future_count':future.count(),'has_offered':future.filter(resident=person).exists(),'has_requested':future.exclude(resident=person).exists(),
         'offered':future.filter(resident=person),'requested':future.exclude(resident=person),'bounds':bounds,
-        'exchanges':exchanges[:100],'recent_exchanges':exchanges[:4],'allocations':allocations[:100],'my_shared':my_shared,'allocation_options':allocation_options,'allocation_eligible_ids':allocation_eligible_ids,
+        'exchanges':displayed_exchanges[:100],'recent_exchanges':exchanges[:4],'allocations':displayed_allocations[:100],'my_shared':my_shared,'allocation_options':allocation_options,'allocation_eligible_ids':allocation_eligible_ids,
         'latest_sync':SyncState.objects.order_by('-last_success').first(),'source_cards':source_cards,'drive_folders':DriveFolder.objects.all() if request.user.is_superuser else [],
     })
 @login_required
@@ -96,7 +115,7 @@ def propose(request):
         messages.success(request,'Solicitação enviada. Falta a confirmação do outro residente.')
     except (ValidationError,ValueError) as error:
         messages.error(request,'; '.join(error.messages) if isinstance(error,ValidationError) else 'Escolha dois plantões válidos.')
-    return redirect('dashboard')
+    return redirect('/?tab=requests&box=sent')
 @login_required
 @require_POST
 def respond(request,pk,action):
@@ -106,7 +125,7 @@ def respond(request,pk,action):
         messages.success(request,'Solicitação atualizada.')
     except ValidationError as error:
         messages.error(request,'; '.join(error.messages))
-    return redirect('dashboard')
+    return redirect('/?tab=requests&box=received')
 
 @login_required
 @require_POST
@@ -161,7 +180,8 @@ def calendar_view(request):
     for shift in shifts:
         day=timezone.localtime(shift.starts_at).day
         days.setdefault(day,[]).append(shift)
-    weeks=[[(day,days.get(day,[])) for day in week] for week in calendar.monthcalendar(month.year,month.month)]
+    from .presentation import month_sector_groups
+    weeks=[[(day,month_sector_groups(days.get(day,[]))) for day in week] for week in calendar.monthcalendar(month.year,month.month)]
     return render(request,'calendar.html',{'weeks':weeks,'month':month})
 
 @login_required
@@ -192,7 +212,7 @@ def link_resident(request):
     except ValueError:
         messages.error(request,'Selecione seu nome de residente.')
         return redirect('dashboard')
-    target=get_object_or_404(get_user_model().objects.filter(Q(shift__active=True)|Q(sharedactivity__active=True)|Q(incompleteactivity__isnull=False)).distinct(),pk=pk)
+    target=get_object_or_404(operational_residents(),pk=pk)
     try:
         with transaction.atomic():
             if ResidentAccess.objects.filter(resident=target).exclude(account=request.user).exists():
@@ -299,3 +319,28 @@ def live_status(request):
     response=JsonResponse({'revision':data_revision()})
     response['Cache-Control']='private, no-store'
     return response
+
+@login_required
+@require_POST
+def create_resident_account(request):
+    from django.http import HttpResponseForbidden
+    from django.db import transaction,IntegrityError
+    from django.contrib.auth import get_user_model
+    from .models import ResidentAccess
+    from .forms import ResidentAccountForm
+    if not request.user.is_superuser:return HttpResponseForbidden('Somente o administrador pode criar contas.')
+    form=ResidentAccountForm(request.POST)
+    if form.is_valid():
+        try:
+            with transaction.atomic():
+                resident=get_user_model().objects.select_for_update().get(pk=form.cleaned_data['resident'].pk)
+                if resident.has_usable_password() or ResidentAccess.objects.filter(resident=resident).exists():
+                    raise ValidationError('Este residente já possui acesso individual.')
+                account=form.save(commit=False)
+                account.first_name=resident.first_name;account.last_name=resident.last_name
+                account.save()
+                ResidentAccess.objects.create(account=account,resident=resident)
+            messages.success(request,'Conta individual criada. Entregue o usuário e a senha diretamente ao residente.')
+            return redirect('/?tab=accounts')
+        except (ValidationError,IntegrityError):form.add_error(None,'O usuário ou residente já possui uma conta. Atualize a página e confira os acessos.')
+    return dashboard(request,account_form=form)

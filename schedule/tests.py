@@ -604,3 +604,66 @@ class WorkflowTests(TestCase):
         sync_workbook(book,'sequential-source')
         self.assertEqual(Shift.objects.filter(source='sequential-source',active=True).count(),2)
         self.assertFalse(SharedActivity.objects.filter(source='sequential-source').exists())
+    def test_sector_color_is_stable_and_grouping_preserves_spreadsheet_order(self):
+        from .presentation import sector_hue,sector_rows
+        self.assertEqual(sector_hue('INSTITUTO · Refração'),sector_hue('instituto · refracao'))
+        self.assertNotEqual(sector_hue('UTI'),sector_hue('Patologia'))
+        self.s1.source_cell='C112:G112';self.s1.save()
+        self.s2.source_cell='J11:N11';self.s2.save()
+        groups=sector_rows([{'date':self.start.date(),'shifts':[self.s1,self.s2],'shared':[],'incomplete':[]}])
+        self.assertEqual([g['name'] for g in groups],['PS','UTI'])
+        self.assertEqual(sum(c['count'] for g in groups for c in g['cells']),2)
+    def test_month_calendar_groups_multiple_shifts_in_the_same_sector(self):
+        from .presentation import month_sector_groups
+        self.s2.sector=self.s1.sector
+        groups=month_sector_groups([self.s1,self.s2])
+        self.assertEqual(len(groups),1);self.assertEqual(len(groups[0]['shifts']),2)
+    def test_requests_inbox_only_exposes_requests_addressed_to_resident(self):
+        incoming=self.propose()
+        outgoing=Exchange.objects.create(offered=self.s2,requested=self.s1,proposer=self.b,recipient=self.a)
+        self.client.force_login(self.b)
+        received=self.client.get('/?tab=requests&box=received')
+        self.assertContains(received,'Aceitar troca')
+        self.assertEqual(list(received.context['exchanges']),[incoming])
+        sent=self.client.get('/?tab=requests&box=sent')
+        self.assertEqual(list(sent.context['exchanges']),[outgoing])
+        self.assertNotContains(sent,'Aceitar troca')
+        self.assertEqual(self.client.post(f'/trocas/{outgoing.pk}/accept/').status_code,302)
+        outgoing.refresh_from_db();self.assertEqual(outgoing.status,'pending')
+    def test_admin_can_provision_individual_login_without_changing_imported_identity(self):
+        from .models import ResidentAccess
+        admin=get_user_model().objects.create_superuser('account-admin',password='test-admin-password')
+        imported_username=self.a.username
+        self.client.force_login(admin)
+        response=self.client.post('/contas/criar/',{'resident':self.a.pk,'username':'residente.ana','password1':'Temporary-test-only-462!','password2':'Temporary-test-only-462!'})
+        self.assertRedirects(response,'/?tab=accounts')
+        alias=get_user_model().objects.get(username='residente.ana')
+        self.assertEqual(ResidentAccess.objects.get(account=alias).resident,self.a)
+        self.a.refresh_from_db();self.assertEqual(self.a.username,imported_username)
+        self.assertFalse(alias.is_staff);self.assertTrue(alias.check_password('Temporary-test-only-462!'))
+        self.client.logout();self.assertTrue(self.client.login(username='residente.ana',password='Temporary-test-only-462!'))
+        self.assertEqual(self.client.get('/').context['resident_user'],self.a)
+    def test_only_admin_can_create_accounts_and_bad_passwords_are_not_echoed(self):
+        self.client.force_login(self.b)
+        self.assertEqual(self.client.get('/?tab=accounts').status_code,403)
+        self.assertEqual(self.client.post('/contas/criar/',{}).status_code,403)
+        admin=get_user_model().objects.create_superuser('account-security-admin',password='test-admin-password')
+        self.client.force_login(admin)
+        secret='Never-echo-this-password-74!'
+        response=self.client.post('/contas/criar/',{'resident':self.a.pk,'username':'bad-account','password1':secret,'password2':'different'})
+        self.assertEqual(response.status_code,200)
+        self.assertNotContains(response,secret)
+        self.assertFalse(get_user_model().objects.filter(username='bad-account').exists())
+    def test_duplicate_resident_login_is_rejected_and_own_password_can_change(self):
+        from .models import ResidentAccess
+        admin=get_user_model().objects.create_superuser('duplicate-admin',password='test-admin-password')
+        alias=get_user_model().objects.create_user('already-linked',password='Old-login-password-73!')
+        ResidentAccess.objects.create(account=alias,resident=self.a)
+        self.client.force_login(admin)
+        response=self.client.post('/contas/criar/',{'resident':self.a.pk,'username':'another-alias','password1':'Temporary-test-only-462!','password2':'Temporary-test-only-462!'})
+        self.assertEqual(response.status_code,200)
+        self.assertFalse(get_user_model().objects.filter(username='another-alias').exists())
+        self.client.force_login(alias)
+        self.assertEqual(self.client.get('/accounts/password_change/').status_code,200)
+        response=self.client.post('/accounts/password_change/',{'old_password':'Old-login-password-73!','new_password1':'New-login-password-94!','new_password2':'New-login-password-94!'})
+        self.assertRedirects(response,'/accounts/password_change/done/')

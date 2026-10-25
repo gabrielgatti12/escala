@@ -84,3 +84,13 @@ Intervalos como `12-24` terminam às 00:00 do dia seguinte. Horários inválidos
 Para repetir somente algumas fontes, use `python manage.py sync_sheets ID_1 ID_2 --only`; essa opção não percorre a pasta nem reimporta as demais fontes. Na Oracle, pare o trabalhador periódico antes dessa execução e reative-o ao terminar, inclusive se houver falhas individuais.
 
 Atividades em sequência (por exemplo, Sala Dr. Pedro 08–12 e Patologia 13–18) não são alternativas de divisão. O seletor e o servidor exigem mesma dupla, mesma data e sobreposição de horários; a confirmação revalida essas condições. Repetir um único nome em linhas diferentes mantém seus plantões separados. Linhas com dois nomes sem outra atividade compatível são mostradas como “Dois nomes na origem”, aguardando interpretação, sem atribuição automática ou alteração das decisões existentes.
+
+## Setores, logins e solicitações
+
+O calendário semanal abre em Por setor: setores nas linhas e dias nas colunas, seguindo a ordem das células de origem. Por dia continua disponível. A mesma identidade de cor pastel é mantida nos cartões e agrupamentos mensais, independente do residente ou situação do plantão. Os rótulos continuam indicando pendências e interesse em troca. Nomes e cores são normalizados para manter consistência de espaços, maiúsculas e acentos; as fontes não são alteradas.
+
+Solicitações separa Recebidas, Enviadas e Histórico. A confirmação ou recusa é feita pelo destinatário autenticado dentro do aplicativo. Enviar confirma a parte do solicitante; somente o aceite do destinatário altera as duas titularidades. Solicitações enviadas podem ser canceladas enquanto pendentes. O endereço antigo `?tab=exchanges` continua funcionando.
+
+Em Contas e acessos (somente administrador), selecione o residente importado e crie usuário e senha individuais. O login é ligado ao registro importado por ResidentAccess, preservando o usuário técnico de importação e a continuidade da sincronização. O aplicativo valida senha e unicidade e impede criar outra conta para um residente já vinculado ou com senha própria. A lista mostra vínculos e acessos diretos existentes. Senhas nunca são exibidas; entregar as credenciais diretamente ao residente. O próprio usuário pode alterar a senha pela sua conta. Contas novas não recebem privilégios administrativos.
+
+A interpretação da cobertura do pós-plantão depende de outra planilha, ainda não integrada. Essas alocações permanecem para conferência; não houve atribuição automática baseada nessa cobertura.

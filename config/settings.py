@@ -37,3 +37,6 @@ CSRF_TRUSTED_ORIGINS = [value for value in os.environ.get('DJANGO_CSRF_TRUSTED_O
 if os.environ.get('TRUST_PROXY_HTTPS') == '1':
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SECURE_SSL_REDIRECT = os.environ.get('DJANGO_SSL_REDIRECT', '0') == '1'
+
+AUTHENTICATION_BACKENDS = ['schedule.auth.EmailOrUsernameBackend','django.contrib.auth.backends.ModelBackend']
+PASSWORD_RESET_TIMEOUT = 86400

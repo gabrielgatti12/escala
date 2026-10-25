@@ -635,13 +635,13 @@ class WorkflowTests(TestCase):
         admin=get_user_model().objects.create_superuser('account-admin',password='test-admin-password')
         imported_username=self.a.username
         self.client.force_login(admin)
-        response=self.client.post('/contas/criar/',{'resident':self.a.pk,'username':'residente.ana','password1':'Temporary-test-only-462!','password2':'Temporary-test-only-462!'})
+        response=self.client.post('/contas/criar/',{'resident':self.a.pk,'username':'residente.ana@example.test','password1':'Temporary-test-only-462!','password2':'Temporary-test-only-462!'})
         self.assertRedirects(response,'/?tab=accounts')
-        alias=get_user_model().objects.get(username='residente.ana')
+        alias=get_user_model().objects.get(username='residente.ana@example.test')
         self.assertEqual(ResidentAccess.objects.get(account=alias).resident,self.a)
         self.a.refresh_from_db();self.assertEqual(self.a.username,imported_username)
         self.assertFalse(alias.is_staff);self.assertTrue(alias.check_password('Temporary-test-only-462!'))
-        self.client.logout();self.assertTrue(self.client.login(username='residente.ana',password='Temporary-test-only-462!'))
+        self.client.logout();self.assertTrue(self.client.login(username='residente.ana@example.test',password='Temporary-test-only-462!'))
         self.assertEqual(self.client.get('/').context['resident_user'],self.a)
     def test_only_admin_can_create_accounts_and_bad_passwords_are_not_echoed(self):
         self.client.force_login(self.b)
@@ -667,3 +667,87 @@ class WorkflowTests(TestCase):
         self.assertEqual(self.client.get('/accounts/password_change/').status_code,200)
         response=self.client.post('/accounts/password_change/',{'old_password':'Old-login-password-73!','new_password1':'New-login-password-94!','new_password2':'New-login-password-94!'})
         self.assertRedirects(response,'/accounts/password_change/done/')
+    def test_email_login_ignores_case_and_rejects_ambiguous_email(self):
+        user=get_user_model().objects.create_user('person@example.test',email='person@example.test',password='Email-test-password-932!')
+        self.assertTrue(self.client.login(username=' PERSON@EXAMPLE.TEST ',password='Email-test-password-932!'))
+        self.client.logout()
+        get_user_model().objects.create_user('PERSON@example.test',password='Other-test-password-951!')
+        self.assertFalse(self.client.login(username='person@example.test',password='Email-test-password-932!'))
+    def test_contact_table_parses_three_pairs_and_ignores_notes(self):
+        from .contacts import read_contacts
+        rows=read_contacts('| Pessoa A | A@EXAMPLE.TEST | Pessoa B | B@EXAMPLE.TEST | Pessoa C | C@EXAMPLE.TEST | Horários em laranja | cobertura UNEX |')
+        self.assertEqual(len(rows),3)
+        self.assertEqual(rows[0]['email'],'a@example.test')
+    def test_bulk_contact_import_preserves_resident_and_existing_admin_password(self):
+        from .contacts import contact_preview,apply_contacts
+        from .models import ResidentAccess
+        admin=get_user_model().objects.create_superuser('existing-admin',password='Existing-password-958!')
+        ResidentAccess.objects.create(account=admin,resident=self.a)
+        text='ana,NEW.ADMIN@EXAMPLE.TEST\nbia,bia@example.test'
+        rows=contact_preview(text)
+        self.assertTrue(all(row['ready'] for row in rows))
+        previous=self.a.username
+        results=apply_contacts(text,{0,1})
+        admin.refresh_from_db();self.a.refresh_from_db()
+        self.assertEqual(admin.username,'new.admin@example.test')
+        self.assertTrue(admin.is_superuser);self.assertTrue(admin.check_password('Existing-password-958!'))
+        self.assertEqual(self.a.username,previous)
+        fresh=get_user_model().objects.get(username='bia@example.test')
+        self.assertFalse(fresh.has_usable_password())
+        self.assertEqual(ResidentAccess.objects.get(account=fresh).resident,self.b)
+        self.assertEqual(len(apply_contacts(text,{0,1})),2)
+        self.assertEqual(ResidentAccess.objects.count(),2)
+    def test_contact_import_does_not_guess_invalid_email_names_or_duplicates(self):
+        from .contacts import contact_preview
+        rows=contact_preview('ana,invalid\nUnknown,x@example.test\nana,a@example.test\nbia,a@example.test\ncarla,pessoaç@example.test')
+        self.assertEqual(len(rows),5)
+        self.assertTrue(all(not row['ready'] for row in rows))
+    def test_contact_import_rejects_existing_other_account_and_ambiguous_names(self):
+        from .contacts import contact_preview
+        get_user_model().objects.create_user('unrelated',email='taken@example.test')
+        self.assertFalse(contact_preview('ana,taken@example.test')[0]['ready'])
+        self.a.first_name='José Silva';self.a.save()
+        self.b.first_name='Jose Silva';self.b.save()
+        self.assertFalse(contact_preview('Jose-Silva,one@example.test')[0]['ready'])
+    def test_contact_preview_and_activation_are_admin_only(self):
+        self.client.force_login(self.a)
+        self.assertEqual(self.client.post('/contas/importar/',{'contacts':'ana,a@example.test'}).status_code,403)
+        self.assertEqual(self.client.post(f'/contas/{self.b.pk}/primeiro-acesso/').status_code,403)
+    def test_activation_is_single_use_and_does_not_send_email(self):
+        from .contacts import apply_contacts
+        from django.utils.http import urlsafe_base64_encode
+        from django.utils.encoding import force_bytes
+        from django.contrib.auth.tokens import default_token_generator
+        account=apply_contacts('ana,ana@example.test',{0})[0]
+        uid=urlsafe_base64_encode(force_bytes(account.pk));token=default_token_generator.make_token(account)
+        url=f'/ativar/{uid}/{token}/'
+        response=self.client.get(url)
+        self.assertEqual(response.status_code,302)
+        response=self.client.post(response.url,{'new_password1':'Resident-chosen-password-462!','new_password2':'Resident-chosen-password-462!'})
+        self.assertRedirects(response,'/primeiro-acesso/concluido/')
+        account.refresh_from_db();self.assertTrue(account.check_password('Resident-chosen-password-462!'))
+        self.assertTrue(self.client.login(username='ANA@EXAMPLE.TEST',password='Resident-chosen-password-462!'))
+        self.client.logout();self.assertContains(self.client.get(url),'Link indisponível')
+        from django.core import mail
+        self.assertEqual(len(mail.outbox),0)
+    def test_contact_apply_requires_preview_confirmation_and_no_password_is_set(self):
+        from .models import ResidentAccess
+        admin=get_user_model().objects.create_superuser('bulk-admin',password='Existing-password-958!')
+        self.client.force_login(admin)
+        preview=self.client.post('/contas/importar/',{'contacts':'ana,ana@example.test'})
+        self.assertEqual(preview.status_code,200)
+        self.assertContains(preview,'Aplicar contatos selecionados')
+        self.assertFalse(ResidentAccess.objects.exists())
+        self.assertNotContains(preview,'data-live-status=')
+        applied=self.client.post('/contas/importar/',{'contacts':'ana,ana@example.test','action':'apply','selected':['0']})
+        self.assertEqual(applied.status_code,302)
+        self.assertFalse(get_user_model().objects.get(username='ana@example.test').has_usable_password())
+    def test_existing_legacy_admin_session_survives_email_import(self):
+        from .models import ResidentAccess
+        admin=get_user_model().objects.create_superuser('legacy-session-admin',password='Existing-password-958!')
+        ResidentAccess.objects.create(account=admin,resident=self.a)
+        self.client.force_login(admin,backend='django.contrib.auth.backends.ModelBackend')
+        response=self.client.post('/contas/importar/',{'contacts':'ana,admin@example.test','action':'apply','selected':['0']})
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(self.client.get('/?tab=accounts').status_code,200)
+        admin.refresh_from_db();self.assertEqual(admin.username,'admin@example.test')

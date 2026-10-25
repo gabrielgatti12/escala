@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.shortcuts import render,redirect,get_object_or_404
 from django.views.decorators.http import require_POST
+from django.views.decorators.debug import sensitive_post_parameters
 from django.utils import timezone
 from .models import Shift,Exchange,RotationActivity,SyncState,SharedActivity,Allocation,IncompleteActivity
 from .services import propose_exchange, respond_exchange
@@ -322,6 +323,7 @@ def live_status(request):
 
 @login_required
 @require_POST
+@sensitive_post_parameters('password1','password2')
 def create_resident_account(request):
     from django.http import HttpResponseForbidden
     from django.db import transaction,IntegrityError
@@ -338,9 +340,59 @@ def create_resident_account(request):
                     raise ValidationError('Este residente já possui acesso individual.')
                 account=form.save(commit=False)
                 account.first_name=resident.first_name;account.last_name=resident.last_name
+                account.email=form.cleaned_data['username']
                 account.save()
                 ResidentAccess.objects.create(account=account,resident=resident)
             messages.success(request,'Conta individual criada. Entregue o usuário e a senha diretamente ao residente.')
             return redirect('/?tab=accounts')
         except (ValidationError,IntegrityError):form.add_error(None,'O usuário ou residente já possui uma conta. Atualize a página e confira os acessos.')
     return dashboard(request,account_form=form)
+
+@login_required
+@require_POST
+@sensitive_post_parameters('contacts')
+def import_resident_contacts(request):
+    from django.http import HttpResponseForbidden
+    from django.db import IntegrityError
+    from .contacts import contact_preview,apply_contacts
+    if not request.user.is_superuser:return HttpResponseForbidden('Somente o administrador pode importar contatos.')
+    text=request.POST.get('contacts','')
+    rows=[]
+    try:
+        rows=contact_preview(text)
+        if request.POST.get('action')=='apply':
+            selected={int(value) for value in request.POST.getlist('selected')}
+            accounts=apply_contacts(text,selected)
+            messages.success(request,f'{len(accounts)} acessos configurados por e-mail. Senhas existentes foram preservadas.')
+            return redirect('/?tab=accounts')
+    except (ValidationError,ValueError,IntegrityError) as error:
+        message='; '.join(error.messages) if isinstance(error,ValidationError) else 'Não foi possível aplicar a tabela. Confira a prévia e os conflitos de contas.'
+        messages.error(request,message)
+    return render(request,'contacts_preview.html',{'tab':'accounts','contact_text':text,'contact_rows':rows})
+
+@login_required
+@require_POST
+def account_activation_link(request,pk):
+    from django.http import HttpResponseForbidden
+    from django.contrib.auth import get_user_model
+    from django.contrib.auth.tokens import default_token_generator
+    from django.utils.http import urlsafe_base64_encode
+    from django.utils.encoding import force_bytes
+    from django.urls import reverse
+    if not request.user.is_superuser:return HttpResponseForbidden('Somente o administrador pode gerar links de primeiro acesso.')
+    account=get_object_or_404(get_user_model(),pk=pk,is_active=True)
+    if account.has_usable_password():
+        messages.error(request,'Esta conta já tem senha. O login por e-mail mantém a senha existente.')
+        return redirect('/?tab=accounts')
+    link=request.build_absolute_uri(reverse('activate_account',kwargs={'uidb64':urlsafe_base64_encode(force_bytes(account.pk)),'token':default_token_generator.make_token(account)}))
+    response=render(request,'activation_link.html',{'tab':'accounts','activation_url':link,'activation_account':account})
+    response['Cache-Control']='private, no-store'
+    response['Referrer-Policy']='no-referrer'
+    return response
+
+from django.contrib.auth.views import PasswordResetConfirmView
+class ActivateResidentAccount(PasswordResetConfirmView):
+    template_name='registration/activate_account.html'
+    def get_user(self,uidb64):
+        user=super().get_user(uidb64)
+        return user if user and user.is_active and not user.has_usable_password() else None

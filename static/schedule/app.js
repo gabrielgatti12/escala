@@ -12,7 +12,7 @@
     let available = 0;
     for (const option of theirs.options) {
       if (!option.value) continue;
-      const matches = !!mine.value && option.value !== mine.value && option.dataset.pair === choice.dataset.pair && option.dataset.day === choice.dataset.day;
+      const matches = !!mine.value && option.value !== mine.value && option.dataset.pair === choice.dataset.pair && option.dataset.day === choice.dataset.day && Date.parse(option.dataset.start) < Date.parse(choice.dataset.end) && Date.parse(choice.dataset.start) < Date.parse(option.dataset.end);
       if (matches) available += 1;
       option.hidden = !matches;
       option.disabled = !matches;

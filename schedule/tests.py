@@ -575,3 +575,32 @@ class WorkflowTests(TestCase):
         with patch('schedule.management.commands.sync_sheets.fetch_workbook',return_value=book) as fetch:
             call_command('sync_sheets','a'*30,only=True)
             fetch.assert_called_once_with('a'*30)
+    def test_sequential_activities_cannot_be_divided(self):
+        from .services import propose_allocation
+        mine,theirs=self.allocation_pair()
+        theirs.starts_at=mine.ends_at+timedelta(hours=1)
+        theirs.ends_at=theirs.starts_at+timedelta(hours=4);theirs.save()
+        with self.assertRaisesMessage(ValidationError,'Atividades em sequência'):
+            propose_allocation(self.a,mine.pk,theirs.pk)
+        self.client.force_login(self.a)
+        response=self.client.get('/')
+        self.assertEqual(response.context['allocation_options'],[])
+    def test_acceptance_revalidates_overlapping_times(self):
+        from .services import propose_allocation,respond_allocation
+        mine,theirs=self.allocation_pair()
+        proposal=propose_allocation(self.a,mine.pk,theirs.pk)
+        theirs.starts_at=mine.ends_at;theirs.ends_at=mine.ends_at+timedelta(hours=3);theirs.save()
+        with self.assertRaisesMessage(ValidationError,'Atividades em sequência'):
+            respond_allocation(self.b,proposal.pk,'accept')
+        mine.refresh_from_db();self.assertIsNone(mine.allocated_to_id)
+    def test_one_resident_in_two_rows_has_two_sequential_shifts(self):
+        from openpyxl import Workbook
+        from .sheets import sync_workbook
+        from .models import SharedActivity
+        book=Workbook();sheet=book.active;sheet.title='Espelho Semanal'
+        sheet.append([None,self.start.replace(tzinfo=None)]);sheet.append([None,'Segunda'])
+        sheet.append(['HOSPITAL','Sala Dr. Pedro']);sheet.append([None,None,'8-12',None,None,'Residente Um'])
+        sheet.append(['INSTITUTO','Patologia']);sheet.append([None,None,'13-18',None,None,'Residente Um'])
+        sync_workbook(book,'sequential-source')
+        self.assertEqual(Shift.objects.filter(source='sequential-source',active=True).count(),2)
+        self.assertFalse(SharedActivity.objects.filter(source='sequential-source').exists())

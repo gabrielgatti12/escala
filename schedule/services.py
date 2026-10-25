@@ -59,6 +59,8 @@ from .models import Allocation, SharedActivity
 def validate_allocation(user,mine,theirs):
     if mine.pk==theirs.pk or mine.starts_at.date()!=theirs.starts_at.date():
         raise ValidationError('Escolha duas atividades distintas do mesmo dia.')
+    if mine.starts_at>=theirs.ends_at or theirs.starts_at>=mine.ends_at:
+        raise ValidationError('Atividades em sequência devem ser cumpridas nos respectivos horários e não podem ser divididas entre os residentes.')
     participants=set(mine.residents.values_list('pk',flat=True))
     if len(participants)!=2 or user.pk not in participants or participants!=set(theirs.residents.values_list('pk',flat=True)):
         raise ValidationError('As duas atividades devem pertencer à mesma dupla.')

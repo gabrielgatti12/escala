@@ -68,7 +68,10 @@ def dashboard(request):
     pending_count=exchanges.filter(status='pending').count()+allocations.filter(status='pending').count()
     received_count=exchanges.filter(status='pending',recipient=person).count()+allocations.filter(status='pending',recipient=person).count()
     my_shared=list(shared.filter(residents=person))
-    allocation_options=[{'activity':item,'pair':','.join(str(pk) for pk in sorted(u.pk for u in item.residents.all())),'day':timezone.localtime(item.starts_at).date().isoformat()} for item in my_shared]
+    candidates=[{'activity':item,'pair':','.join(str(pk) for pk in sorted(u.pk for u in item.residents.all())),'day':timezone.localtime(item.starts_at).date().isoformat(),'start':item.starts_at.isoformat(),'end':item.ends_at.isoformat()} for item in my_shared if len(item.residents.all())==2]
+    allocation_options=[option for option in candidates if any(other['activity'].pk!=option['activity'].pk and other['pair']==option['pair'] and other['day']==option['day'] and option['activity'].starts_at<other['activity'].ends_at and other['activity'].starts_at<option['activity'].ends_at for other in candidates)]
+    allocation_eligible_ids={option['activity'].pk for option in allocation_options}
+    my_shared=[option['activity'] for option in allocation_options]
     states={state.source:state for state in SyncState.objects.all()}
     source_cards=[]
     if request.user.is_superuser:
@@ -82,7 +85,7 @@ def dashboard(request):
         'own_week_count':own_week_count,'own_shared_count':own_shared_count,'pending_count':pending_count,'received_count':received_count,
         'future_count':future.count(),'has_offered':future.filter(resident=person).exists(),'has_requested':future.exclude(resident=person).exists(),
         'offered':future.filter(resident=person),'requested':future.exclude(resident=person),'bounds':bounds,
-        'exchanges':exchanges[:100],'recent_exchanges':exchanges[:4],'allocations':allocations[:100],'my_shared':my_shared,'allocation_options':allocation_options,
+        'exchanges':exchanges[:100],'recent_exchanges':exchanges[:4],'allocations':allocations[:100],'my_shared':my_shared,'allocation_options':allocation_options,'allocation_eligible_ids':allocation_eligible_ids,
         'latest_sync':SyncState.objects.order_by('-last_success').first(),'source_cards':source_cards,'drive_folders':DriveFolder.objects.all() if request.user.is_superuser else [],
     })
 @login_required

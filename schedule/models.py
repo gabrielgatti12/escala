@@ -35,6 +35,9 @@ class Exchange(models.Model):
     status = models.CharField(max_length=12,choices=[('pending','Aguardando confirmação'),('accepted','Aceita'),('rejected','Recusada'),('cancelled','Cancelada')],default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
     resolved_at = models.DateTimeField(null=True,blank=True)
+    @property
+    def is_expired(self):
+        return self.status=='pending' and min(self.offered.starts_at,self.requested.starts_at)<=timezone.now()
     class Meta:
         ordering = ['-created_at']
 
@@ -50,6 +53,10 @@ class RotationActivity(models.Model):
         ordering = ['date','period','resident__username']
 
 class SyncState(models.Model):
+    @property
+    def reconciliation_count(self):
+        match = re.search(r'(\d+) exigem conciliação', self.summary)
+        return int(match.group(1)) if match else 0
     source = models.CharField(max_length=100,unique=True)
     last_success = models.DateTimeField(null=True,blank=True)
     summary = models.CharField(max_length=250,blank=True)
@@ -80,6 +87,9 @@ class Allocation(models.Model):
     status = models.CharField(max_length=12,choices=Exchange._meta.get_field('status').choices,default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
     resolved_at = models.DateTimeField(null=True,blank=True)
+    @property
+    def is_expired(self):
+        return self.status=='pending' and min(self.mine.starts_at,self.theirs.starts_at)<=timezone.now()
 
 class ResidentAccess(models.Model):
     account = models.OneToOneField(settings.AUTH_USER_MODEL,on_delete=models.CASCADE,related_name='resident_access')

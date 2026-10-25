@@ -1,7 +1,8 @@
 import time
 from django.core.management.base import BaseCommand,CommandError
-from schedule.sheets import fetch_workbook,sync_workbook,workbook_week_label
+from schedule.sheets import fetch_workbook,sync_workbook,workbook_week_label,SheetFormatError
 from schedule.models import SheetSource,DriveFolder
+from schedule.services import expire_pending_requests
 
 class Command(BaseCommand):
     help='Reúne planilhas semanais cadastradas e descobre subpastas do Drive quando configuradas.'
@@ -21,6 +22,7 @@ class Command(BaseCommand):
         session=None
         try:
             while True:
+                expire_pending_requests()
                 folders=DriveFolder.objects.none() if only else DriveFolder.objects.filter(enabled=True)
                 if folders.exists():
                     try:
@@ -60,7 +62,12 @@ class Command(BaseCommand):
                         self.stdout.write(summary)
                     except Exception as error:
                         failures+=1
-                        source.error=f'Sincronização falhou ({type(error).__name__}); dados anteriores preservados.'
+                        if isinstance(error,SheetFormatError):
+                            source.error=f'Sincronização falhou; dados anteriores preservados. {error}'[:250]
+                        else:
+                            # Network/credential exceptions may contain URLs and API
+                            # keys, so only known workbook errors expose details.
+                            source.error=f'Sincronização falhou ({type(error).__name__}); dados anteriores preservados.'
                         source.save(update_fields=['error']);self.stderr.write(source.error)
                     finally:
                         if book: book.close()

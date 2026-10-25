@@ -27,10 +27,14 @@ def dashboard(request,account_form=None):
     scope='all' if request.GET.get('scope')=='all' else 'mine'
     active=Shift.objects.filter(active=True).select_related('resident')
     future=active.filter(starts_at__gt=now)
-    upcoming=future.filter(resident=person).first() or future.first()
-    default_day=timezone.localtime(upcoming.starts_at).date() if upcoming else today
+    from .calendar_data import next_activity_day,allocation_choices
+    default_day=next_activity_day(person,now)
+    if default_day is None:
+        upcoming=future.first()
+        default_day=timezone.localdate(upcoming.starts_at) if upcoming else today
     try:
         selected=date.fromisoformat(request.GET.get('week',default_day.isoformat()))
+        if selected.year in [1,9999]:selected=default_day
     except ValueError:
         selected=default_day
     week_start=selected-timedelta(days=selected.weekday())
@@ -67,11 +71,11 @@ def dashboard(request,account_form=None):
     residents=operational_residents().filter(is_active=True).order_by('first_name','username')
     exchanges=Exchange.objects.filter(Q(proposer=person)|Q(recipient=person)).select_related('offered','requested','proposer','recipient')
     allocations=Allocation.objects.filter(Q(proposer=person)|Q(recipient=person)).select_related('mine','theirs','proposer','recipient').order_by('-created_at')
-    pending_count=exchanges.filter(status='pending').count()+allocations.filter(status='pending').count()
-    received_count=exchanges.filter(status='pending',recipient=person).count()+allocations.filter(status='pending',recipient=person).count()
-    my_shared=list(shared.filter(residents=person))
-    candidates=[{'activity':item,'pair':','.join(str(pk) for pk in sorted(u.pk for u in item.residents.all())),'day':timezone.localtime(item.starts_at).date().isoformat(),'start':item.starts_at.isoformat(),'end':item.ends_at.isoformat()} for item in my_shared if len(item.residents.all())==2]
-    allocation_options=[option for option in candidates if any(other['activity'].pk!=option['activity'].pk and other['pair']==option['pair'] and other['day']==option['day'] and option['activity'].starts_at<other['activity'].ends_at and other['activity'].starts_at<option['activity'].ends_at for other in candidates)]
+    pending_exchanges=exchanges.filter(status='pending',offered__starts_at__gt=now,requested__starts_at__gt=now)
+    pending_allocations=allocations.filter(status='pending',mine__starts_at__gt=now,theirs__starts_at__gt=now)
+    pending_count=pending_exchanges.count()+pending_allocations.count()
+    received_count=pending_exchanges.filter(recipient=person).count()+pending_allocations.filter(recipient=person).count()
+    allocation_options=allocation_choices(shared.filter(residents=person,starts_at__gt=now))
     allocation_eligible_ids={option['activity'].pk for option in allocation_options}
     my_shared=[option['activity'] for option in allocation_options]
     states={state.source:state for state in SyncState.objects.all()}
@@ -87,11 +91,11 @@ def dashboard(request,account_form=None):
     displayed_exchanges=exchanges;displayed_allocations=allocations
     if tab=='requests':
         if box=='history':
-            displayed_exchanges=exchanges.exclude(status='pending');displayed_allocations=allocations.exclude(status='pending')
+            displayed_exchanges=exchanges.exclude(pk__in=pending_exchanges.values('pk'));displayed_allocations=allocations.exclude(pk__in=pending_allocations.values('pk'))
         else:
             role='recipient' if box=='received' else 'proposer'
-            displayed_exchanges=exchanges.filter(status='pending',**{role:person})
-            displayed_allocations=allocations.filter(status='pending',**{role:person})
+            displayed_exchanges=pending_exchanges.filter(**{role:person})
+            displayed_allocations=pending_allocations.filter(**{role:person})
     access_accounts=[];direct_accounts=[]
     if tab=='accounts':
         from .forms import ResidentAccountForm
@@ -100,7 +104,7 @@ def dashboard(request,account_form=None):
         access_accounts=ResidentAccess.objects.select_related('account','resident').order_by('resident__first_name')
         direct_accounts=operational_residents().filter(is_active=True).exclude(password__startswith='!').order_by('first_name','username')
     return render(request,'dashboard.html',{
-        'sector_rows':sector_rows(days),'layout':'day' if request.GET.get('layout')=='day' else 'sector','account_form':account_form,'access_accounts':access_accounts,'direct_accounts':direct_accounts,'box':box,'sent_count':exchanges.filter(status='pending',proposer=person).count()+allocations.filter(status='pending',proposer=person).count(),'incoming_preview':exchanges.filter(status='pending',recipient=person)[:4],'tab':tab,'scope':scope,'resident_user':person,'linked':person.pk!=request.user.pk,'resident_choices':residents,'residents':residents,
+        'sector_rows':sector_rows(days),'layout':'day' if request.GET.get('layout')=='day' else 'sector','account_form':account_form,'access_accounts':access_accounts,'direct_accounts':direct_accounts,'box':box,'sent_count':pending_exchanges.filter(proposer=person).count()+pending_allocations.filter(proposer=person).count(),'incoming_preview':pending_exchanges.filter(recipient=person)[:4],'tab':tab,'scope':scope,'resident_user':person,'linked':person.pk!=request.user.pk,'resident_choices':residents,'residents':residents,
         'days':days,'week_start':week_start,'week_last':week_next-timedelta(days=1),'week_previous':week_start-timedelta(days=7),'week_next':week_next,'today':today,'now':now,
         'own_week_count':own_week_count,'own_shared_count':own_shared_count,'pending_count':pending_count,'received_count':received_count,
         'future_count':future.count(),'has_offered':future.filter(resident=person).exists(),'has_requested':future.exclude(resident=person).exists(),
@@ -126,7 +130,7 @@ def respond(request,pk,action):
         messages.success(request,'Solicitação atualizada.')
     except ValidationError as error:
         messages.error(request,'; '.join(error.messages))
-    return redirect('/?tab=requests&box=received')
+    return redirect('/?tab=requests&box=sent' if action=='cancel' else '/?tab=requests&box=received')
 
 @login_required
 @require_POST
@@ -153,7 +157,7 @@ def allocation_propose(request):
         messages.success(request,'Divisão proposta. Aguarde o aceite do colega para atualizar o calendário.')
     except (ValidationError,ValueError) as error:
         messages.error(request,'; '.join(error.messages) if isinstance(error,ValidationError) else 'Escolha duas atividades válidas.')
-    return redirect('dashboard')
+    return redirect('/?tab=requests&box=sent')
 
 @login_required
 @require_POST
@@ -165,15 +169,16 @@ def allocation_respond(request,pk,action):
         respond_allocation(resident_for_account(request.user),pk,action)
         messages.success(request,'Divisão atualizada. As definições aceitas já aparecem no calendário final.')
     except ValidationError as error: messages.error(request,'; '.join(error.messages))
-    return redirect('dashboard')
+    return redirect('/?tab=requests&box=sent' if action=='cancel' else '/?tab=requests&box=received')
 
 @login_required
 def calendar_view(request):
     import calendar
-    from datetime import date
+    from datetime import date,timedelta
     today=timezone.localdate()
     try:
         month=date.fromisoformat(request.GET.get('month',today.strftime('%Y-%m'))+'-01')
+        if month.year in [1,9999]:month=today.replace(day=1)
     except ValueError: month=today.replace(day=1)
     shifts=Shift.objects.filter(active=True,starts_at__year=month.year,starts_at__month=month.month).select_related('resident')
     if request.GET.get('all')!='1': shifts=shifts.filter(resident=resident_for_account(request.user))
@@ -183,7 +188,7 @@ def calendar_view(request):
         days.setdefault(day,[]).append(shift)
     from .presentation import month_sector_groups
     weeks=[[(day,month_sector_groups(days.get(day,[]))) for day in week] for week in calendar.monthcalendar(month.year,month.month)]
-    return render(request,'calendar.html',{'weeks':weeks,'month':month})
+    return render(request,'calendar.html',{'weeks':weeks,'month':month,'previous_month':(month-timedelta(days=1)).replace(day=1),'next_month':(month+timedelta(days=32)).replace(day=1),'today':today,'has_shifts':bool(days)})
 
 @login_required
 def calendar_ics(request):
@@ -248,7 +253,7 @@ def register_source(request):
         source,created=SheetSource.objects.get_or_create(spreadsheet_id=sheet_id,defaults={'name':request.POST.get('name','').strip()[:200]})
         if not source.enabled:
             source.enabled=True;source.save(update_fields=['enabled'])
-        messages.success(request,'Planilha cadastrada. A sincronização acontece no próximo ciclo, em até 5 minutos.')
+        messages.success(request,'Planilha cadastrada. A sincronização acontecerá no próximo ciclo; o prazo depende da quantidade de fontes.')
     return redirect('/?tab=sources')
 
 

@@ -16,6 +16,9 @@ from .models import Shift, Exchange, RotationActivity, SyncState, SharedActivity
 HOURS = re.compile(r'^\s*(\d{1,2})(?::(\d{2}))?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?\s*$')
 GROUP = re.compile(r'^(R[123]|C[123][ab])\s*-\s*[A-Z]+$',re.I)
 
+class SheetFormatError(ValueError):
+    """A known workbook layout problem with a safe, user-facing explanation."""
+
 def digest(text):
     return hashlib.sha256(text.encode()).hexdigest()[:32]
 
@@ -53,13 +56,13 @@ def sync_workbook(book, source):
     state,_=SyncState.objects.get_or_create(source=source)
     state=SyncState.objects.select_for_update().get(pk=state.pk)
     if 'Espelho Semanal' not in book.sheetnames:
-        raise ValueError('Aba Espelho Semanal ausente; nada foi alterado.')
+        raise SheetFormatError('Aba Espelho Semanal ausente; nada foi alterado.')
     rows=list(book['Espelho Semanal'].values)
     if not rows:
-        raise ValueError('Espelho Semanal vazio.')
+        raise SheetFormatError('Espelho Semanal vazio.')
     days=[(i,v.date()) for i,v in enumerate(rows[0]) if isinstance(v,datetime)]
     if not days:
-        raise ValueError('Datas não reconhecidas; nada foi alterado.')
+        raise SheetFormatError('Datas não reconhecidas; nada foi alterado.')
     seen=[]; shared_seen=[]; incomplete_seen=[]; rest_count=0; occurrences={}; preserved=0
     for col,day in days:
         sector=''; location=''
@@ -74,7 +77,7 @@ def sync_workbook(book, source):
             if match and not has_names: continue
             if parsed is None and has_names:
                 if not sector:
-                    raise ValueError(f'Linha {row_number}: setor não identificado.')
+                    raise SheetFormatError(f'Linha {row_number}: setor não identificado.')
                 users=[resident_for(cell(offset)) for offset in [4,5] if isinstance(cell(offset),str) and cell(offset).strip()]
                 key=f'{source}|{day}|{source_cell}|{sector}|'+','.join(u.username for u in users)
                 external_id=digest(key)
@@ -92,12 +95,14 @@ def sync_workbook(book, source):
                         sector=cell(0).strip()
                 continue
             if has_names and not sector:
-                raise ValueError(f'Linha {row_number}: setor não identificado acima dos nomes; importação cancelada.')
+                raise SheetFormatError(f'Linha {row_number}: setor não identificado acima dos nomes; importação cancelada.')
             source_cell=f'{get_column_letter(col+2)}{row_number}:{get_column_letter(col+6)}{row_number}'
             start,end=parsed
             names=[cell(offset).strip() for offset in [4,5] if isinstance(cell(offset),str) and cell(offset).strip()]
-            if len(set(names))>1:
-                users=[resident_for(name) for name in sorted(set(names))]
+            # F/G may repeat the same person, including differences in spacing
+            # or capitalization. Resolve identities before deciding it is a pair.
+            users=list({user.pk:user for user in (resident_for(name) for name in sorted(set(names)))}.values())
+            if len(users)>1:
                 label=f'{location} · {sector}'[:120]
                 key=f'{day}|{start.isoformat()}|{end.isoformat()}|{label}|'+','.join(u.username for u in users)
                 ext=f'{source[:40]}:{digest(key)}'
@@ -105,10 +110,7 @@ def sync_workbook(book, source):
                 activity,_=SharedActivity.objects.update_or_create(external_id=ext,defaults={'source':source,'active':True,'source_cell':source_cell,'starts_at':start,'ends_at':end,'sector':label})
                 activity.residents.set(users)
                 continue
-            for offset in [4,5]:
-                name=cell(offset)
-                if not isinstance(name,str) or not name.strip(): continue
-                user=resident_for(name)
+            for user in users:
                 label=f'{location} · {sector}'[:120]
                 key=f'{day}|{start.isoformat()}|{end.isoformat()}|{user.username}|{label}'
                 occurrences[key]=occurrences.get(key,0)+1
@@ -120,7 +122,7 @@ def sync_workbook(book, source):
                     continue
                 Shift.objects.update_or_create(external_id=ext,defaults={'source':source,'active':True,'source_cell':source_cell,'resident':user,'starts_at':start,'ends_at':end,'sector':label})
     if not seen and not shared_seen and not incomplete_seen:
-        raise ValueError('Nenhum horário reconhecido; sincronização cancelada para preservar os dados.')
+        raise SheetFormatError('Nenhum horário reconhecido; sincronização cancelada para preservar os dados.')
     removed_shared=list(SharedActivity.objects.filter(source=source,allocated_to__isnull=True).exclude(external_id__in=shared_seen).values_list('pk',flat=True))
     SharedActivity.objects.filter(pk__in=removed_shared).update(active=False)
     Allocation.objects.filter(status='pending').filter(Q(mine_id__in=removed_shared)|Q(theirs_id__in=removed_shared)).update(status='cancelled',resolved_at=timezone.now())

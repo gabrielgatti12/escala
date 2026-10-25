@@ -56,8 +56,21 @@ def respond_exchange(user, pk, action):
 
 from .models import Allocation, SharedActivity
 
+@transaction.atomic
+def expire_pending_requests(now=None):
+    now=now or timezone.now()
+    exchanges=Exchange.objects.filter(status='pending').filter(Q(offered__starts_at__lte=now)|Q(requested__starts_at__lte=now))
+    allocations=Allocation.objects.filter(status='pending').filter(Q(mine__starts_at__lte=now)|Q(theirs__starts_at__lte=now))
+    # Avoid acquiring a SQLite write lock on every cycle when nothing expired.
+    return {
+        'exchanges':exchanges.update(status='cancelled',resolved_at=now) if exchanges.exists() else 0,
+        'allocations':allocations.update(status='cancelled',resolved_at=now) if allocations.exists() else 0,
+    }
+
 def validate_allocation(user,mine,theirs):
-    if mine.pk==theirs.pk or mine.starts_at.date()!=theirs.starts_at.date():
+    if min(mine.starts_at,theirs.starts_at)<=timezone.now():
+        raise ValidationError('Só é possível dividir atividades futuras.')
+    if mine.pk==theirs.pk or timezone.localdate(mine.starts_at)!=timezone.localdate(theirs.starts_at):
         raise ValidationError('Escolha duas atividades distintas do mesmo dia.')
     if mine.starts_at>=theirs.ends_at or theirs.starts_at>=mine.ends_at:
         raise ValidationError('Atividades em sequência devem ser cumpridas nos respectivos horários e não podem ser divididas entre os residentes.')
@@ -89,7 +102,9 @@ def respond_allocation(user,pk,action):
         if action=='accept':
             activities={a.pk:a for a in SharedActivity.objects.select_for_update().filter(pk__in=[allocation.mine_id,allocation.theirs_id]).order_by('pk')}
             mine,theirs=activities[allocation.mine_id],activities[allocation.theirs_id]
-            validate_allocation(allocation.proposer,mine,theirs)
+            recipient_id=validate_allocation(allocation.proposer,mine,theirs)
+            if recipient_id!=allocation.recipient_id:
+                raise ValidationError('A dupla destas atividades mudou. Crie uma nova proposta de divisão.')
             for activity,owner_id in [(mine,allocation.proposer_id),(theirs,allocation.recipient_id)]:
                 if Shift.objects.filter(active=True,resident_id=owner_id,starts_at__lt=activity.ends_at,ends_at__gt=activity.starts_at).exists():
                     raise ValidationError('A divisão causaria conflito com um plantão já confirmado.')

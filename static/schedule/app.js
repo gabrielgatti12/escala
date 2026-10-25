@@ -6,6 +6,27 @@
   const requested = document.getElementById('exchange-requested');
   const mine = document.getElementById('allocation-mine');
   const theirs = document.getElementById('allocation-theirs');
+  const searches = [...document.querySelectorAll('[data-filter-select]')];
+  const normalize = value => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
+  function filterShifts(input) {
+    const select = document.getElementById(input.dataset.filterSelect);
+    const words = normalize(input.value).trim().split(/\s+/).filter(Boolean);
+    let count = 0;
+    for (const option of select.options) {
+      if (!option.value) continue;
+      const text = normalize(option.textContent);
+      const matches = words.every(word => text.includes(word));
+      option.hidden = !matches;
+      option.disabled = !matches;
+      if (matches) count += 1;
+      else if (option.selected) select.value = '';
+    }
+    document.getElementById(select.id + '-count').textContent = count ? (count === 1 ? '1 plantão encontrado' : `${count} plantões encontrados`) : 'Nenhum plantão encontrado. Altere a busca.';
+  }
+  searches.forEach(input => {
+    input.addEventListener('input', () => filterShifts(input));
+    filterShifts(input);
+  });
   function filterActivities() {
     if (!mine || !theirs) return;
     const choice = mine.selectedOptions[0];
@@ -26,6 +47,7 @@
   document.querySelectorAll('[data-open-exchange]').forEach(button => {
     button.addEventListener('click', () => {
       if (!exchange) return;
+      searches.forEach(input => { input.value = ''; filterShifts(input); });
       offered.value = button.dataset.offered || '';
       requested.value = button.dataset.requested || '';
       exchange.showModal();

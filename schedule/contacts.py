@@ -60,6 +60,8 @@ def contact_preview(text):
             row['status']='Residente desativado; revisão administrativa necessária.';continue
         mapping=ResidentAccess.objects.select_related('account').filter(resident=resident).first()
         account=mapping.account if mapping else (resident if resident.username.casefold()==row['email'] else None)
+        if account and not account.is_active:
+            row['status']='Conta de acesso desativada; revisão administrativa necessária.';continue
         if resident.is_staff or resident.is_superuser:
             row['status']='Conta administrativa direta: revise o vínculo antes de importar.';continue
         conflicts=get_user_model().objects.filter(username__iexact=row['email'])|get_user_model().objects.filter(email__iexact=row['email'])
@@ -93,5 +95,10 @@ def apply_contacts(text,selected):
         else:
             account.username=row['email'];account.email=row['email']
             account.save(update_fields=['username','email'])
+        # The imported identity remains the owner of schedule records, but its
+        # former credentials must stop working after access moves to an alias.
+        if account.pk!=resident.pk and resident.has_usable_password():
+            resident.set_unusable_password()
+            resident.save(update_fields=['password'])
         results.append(account)
     return results

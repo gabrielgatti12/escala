@@ -47,6 +47,8 @@ class SheetSourceAdmin(admin.ModelAdmin):
 @admin.register(IncompleteActivity)
 class IncompleteActivityAdmin(admin.ModelAdmin):
     list_display=['date','sector','source_cell','raw_time']
+    list_filter=['source','date']
+    search_fields=['source_cell','sector']
 
 from .models import ExchangeTopic,ForumComment
 @admin.register(ExchangeTopic)

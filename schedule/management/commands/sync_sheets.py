@@ -9,7 +9,9 @@ class Command(BaseCommand):
         parser.add_argument('sheet_ids',nargs='*')
         parser.add_argument('--interval',type=int,default=0)
         parser.add_argument('--registered',action='store_true')
-    def handle(self,sheet_ids,interval,registered,**options):
+        parser.add_argument('--only',action='store_true',help='Importa somente os IDs informados, sem descoberta de pastas.')
+    def handle(self,sheet_ids,interval,registered,only,**options):
+        if only and not sheet_ids: raise CommandError('--only exige IDs de planilhas.')
         if interval and interval<30: raise CommandError('Intervalo mínimo: 30 segundos.')
         if not sheet_ids and not registered: raise CommandError('Informe IDs ou use --registered.')
         for sheet_id in sheet_ids:
@@ -19,7 +21,7 @@ class Command(BaseCommand):
         session=None
         try:
             while True:
-                folders=DriveFolder.objects.filter(enabled=True)
+                folders=DriveFolder.objects.none() if only else DriveFolder.objects.filter(enabled=True)
                 if folders.exists():
                     try:
                         from schedule.drive import authenticated_session,discover_folder
@@ -36,7 +38,9 @@ class Command(BaseCommand):
                         folders.update(error=f'Acesso Drive indisponível ({type(error).__name__}). Configure a chave de API para a pasta pública ou a credencial de leitura na instância.')
                         self.stderr.write('Pastas do Drive ainda não acessíveis; continuando com as fontes conhecidas.')
                 failures=0
-                for source in SheetSource.objects.filter(enabled=True):
+                sources=SheetSource.objects.filter(enabled=True)
+                if only: sources=sources.filter(spreadsheet_id__in=sheet_ids)
+                for source in sources:
                     book=None
                     try:
                         if source.folder_id:

@@ -529,3 +529,49 @@ class WorkflowTests(TestCase):
             public_export.assert_called_once_with('b'*30)
             private_export.assert_not_called()
         self.assertEqual(Shift.objects.filter(source='b'*30,active=True).count(),1)
+    def test_midnight_end_is_the_following_day(self):
+        from .sheets import parse_shift_hours
+        day=timezone.localtime(self.start).date()
+        start,end=parse_shift_hours(day,'12-24')
+        self.assertEqual(timezone.localtime(start).hour,12)
+        self.assertEqual(timezone.localtime(end).hour,0)
+        self.assertEqual(timezone.localtime(end).date(),day+timedelta(days=1))
+        self.assertIsNone(parse_shift_hours(day,'12-24:30'))
+    def test_rows_without_names_never_create_missing_time_records(self):
+        from openpyxl import Workbook
+        from .sheets import sync_workbook
+        from .models import IncompleteActivity
+        book=Workbook();sheet=book.active;sheet.title='Espelho Semanal'
+        sheet.append([None,self.start.replace(tzinfo=None)]);sheet.append([None,'Segunda'])
+        sheet.append(['INSTITUTO','Ambulatório'])
+        sheet.append([None,'R1',None,None,None,None,None])
+        sheet.append([None,None,'99-99',None,None,'   ',None])
+        sheet.append([None,None,None,None,None,'Pessoa Um',None])
+        sync_workbook(book,'blank-name-source')
+        self.assertEqual(IncompleteActivity.objects.filter(source='blank-name-source').count(),1)
+        self.assertEqual(IncompleteActivity.objects.get(source='blank-name-source').source_cell,'C6:G6')
+    def test_location_marker_does_not_erase_the_sector_above_names(self):
+        from openpyxl import Workbook
+        from .sheets import sync_workbook
+        from .models import IncompleteActivity
+        book=Workbook();sheet=book.active;sheet.title='Espelho Semanal'
+        sheet.append([None,self.start.replace(tzinfo=None)]);sheet.append([None,'Segunda'])
+        sheet.append(['OUTROS',None,'PÓS PLANTÃO R2'])
+        sheet.append(['EXTERNO',None,None,None,None,'Pessoa Um'])
+        summary=sync_workbook(book,'rest-source')
+        activity=IncompleteActivity.objects.get(source='rest-source')
+        self.assertTrue(activity.is_rest)
+        self.assertIn('PÓS PLANTÃO R2',activity.sector)
+        self.assertIn('0 sem horário válido; 1 registros de pós-plantão',summary)
+    def test_targeted_retry_does_not_import_other_registered_sources(self):
+        from unittest.mock import patch
+        from openpyxl import Workbook
+        from .models import SheetSource
+        SheetSource.objects.create(spreadsheet_id='a'*30)
+        SheetSource.objects.create(spreadsheet_id='b'*30)
+        book=Workbook();sheet=book.active;sheet.title='Espelho Semanal'
+        sheet.append([None,self.start.replace(tzinfo=None)]);sheet.append([None,'Segunda'])
+        sheet.append(['INSTITUTO','Ambulatório']);sheet.append([None,'R1','12-24',None,None,'Pessoa Um'])
+        with patch('schedule.management.commands.sync_sheets.fetch_workbook',return_value=book) as fetch:
+            call_command('sync_sheets','a'*30,only=True)
+            fetch.assert_called_once_with('a'*30)

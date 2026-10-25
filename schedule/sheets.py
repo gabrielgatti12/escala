@@ -11,7 +11,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
-from .models import Shift, Exchange, RotationActivity, SyncState, SharedActivity, Allocation, IncompleteActivity
+from .models import Shift, Exchange, RotationActivity, SyncState, SharedActivity, Allocation, IncompleteActivity, is_rest_sector
 
 HOURS = re.compile(r'^\s*(\d{1,2})(?::(\d{2}))?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?\s*$')
 GROUP = re.compile(r'^(R[123]|C[123][ab])\s*-\s*[A-Z]+$',re.I)
@@ -38,6 +38,16 @@ def fetch_workbook(sheet_id):
         raise ValueError('Planilha excede o limite de 20 MB.')
     return load_workbook(BytesIO(data),read_only=True,data_only=True)
 
+def parse_shift_hours(day,value):
+    match=HOURS.fullmatch(str(value or ''))
+    if not match: return None
+    h,m,eh,em=match.groups();h=int(h);m=int(m or 0);eh=int(eh);em=int(em or 0)
+    if h>23 or m>59 or eh>24 or em>59 or (eh==24 and em!=0): return None
+    start=timezone.make_aware(datetime.combine(day,time(h,m)))
+    end=timezone.make_aware(datetime.combine(day+timedelta(days=1) if eh==24 else day,time(eh%24,em)))
+    if end<=start: end+=timedelta(days=1)
+    return start,end
+
 @transaction.atomic
 def sync_workbook(book, source):
     state,_=SyncState.objects.get_or_create(source=source)
@@ -50,24 +60,26 @@ def sync_workbook(book, source):
     days=[(i,v.date()) for i,v in enumerate(rows[0]) if isinstance(v,datetime)]
     if not days:
         raise ValueError('Datas não reconhecidas; nada foi alterado.')
-    seen=[]; shared_seen=[]; incomplete_seen=[]; occurrences={}; preserved=0
+    seen=[]; shared_seen=[]; incomplete_seen=[]; rest_count=0; occurrences={}; preserved=0
     for col,day in days:
         sector=''; location=''
         for row_number,row in enumerate(rows[2:],3):
             def cell(offset): return row[col+offset] if len(row)>col+offset else None
             if row and row[0]:
                 location=str(row[0]).strip()
-                sector=''
             match=HOURS.fullmatch(str(cell(1) or ''))
             has_names=any(isinstance(cell(offset),str) and cell(offset).strip() for offset in [4,5])
             source_cell=f'{get_column_letter(col+2)}{row_number}:{get_column_letter(col+6)}{row_number}'
-            if not match and has_names:
+            parsed=parse_shift_hours(day,cell(1))
+            if match and not has_names: continue
+            if parsed is None and has_names:
                 if not sector:
                     raise ValueError(f'Linha {row_number}: setor não identificado.')
                 users=[resident_for(cell(offset)) for offset in [4,5] if isinstance(cell(offset),str) and cell(offset).strip()]
                 key=f'{source}|{day}|{source_cell}|{sector}|'+','.join(u.username for u in users)
                 external_id=digest(key)
                 incomplete_seen.append(external_id)
+                if is_rest_sector(sector): rest_count+=1
                 activity,_=IncompleteActivity.objects.update_or_create(external_id=external_id,defaults={'source':source,'source_cell':source_cell,'date':day,'sector':f'{location} · {sector}'[:120],'raw_time':str(cell(1) or '')[:100]})
                 activity.residents.set(users)
                 continue
@@ -82,10 +94,7 @@ def sync_workbook(book, source):
             if has_names and not sector:
                 raise ValueError(f'Linha {row_number}: setor não identificado acima dos nomes; importação cancelada.')
             source_cell=f'{get_column_letter(col+2)}{row_number}:{get_column_letter(col+6)}{row_number}'
-            h,m,eh,em=match.groups()
-            start=timezone.make_aware(datetime.combine(day,time(int(h),int(m or 0))))
-            end=timezone.make_aware(datetime.combine(day,time(int(eh),int(em or 0))))
-            if end<=start: end+=timedelta(days=1)
+            start,end=parsed
             names=[cell(offset).strip() for offset in [4,5] if isinstance(cell(offset),str) and cell(offset).strip()]
             if len(set(names))>1:
                 users=[resident_for(name) for name in sorted(set(names))]
@@ -130,7 +139,7 @@ def sync_workbook(book, source):
     RotationActivity.objects.filter(source=source).delete()
     state.last_success=timezone.now()
     pending=SharedActivity.objects.filter(source=source,active=True,allocated_to__isnull=True).count()
-    state.summary=f'{len(seen)} plantões definidos; {pending} alocações pendentes; {len(incomplete_seen)} sem horário válido; {preserved+retained} trocas preservadas; {retained+assigned_obsolete} exigem conciliação.'
+    state.summary=f'{len(seen)} plantões definidos; {pending} alocações pendentes; {len(incomplete_seen)-rest_count} sem horário válido; {rest_count} registros de pós-plantão; {preserved+retained} trocas preservadas; {retained+assigned_obsolete} exigem conciliação.'
     state.save()
     return state.summary
 

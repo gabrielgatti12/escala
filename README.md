@@ -74,3 +74,11 @@ O trabalhador faz um ciclo de descoberta das pastas configuradas e importação 
 O navegador autenticado verifica a revisão dos dados a cada 45 segundos enquanto a aba está visível. Quando há novidades e a página está livre, ela recarrega mantendo a URL e os filtros. Se houver formulário alterado, campo em uso ou janela aberta, aparece um aviso para atualizar quando terminar; comentários em edição não são apagados automaticamente. O endpoint de status só fornece uma revisão, sem conteúdo das escalas.
 
 Na Oracle, prefira `bash scripts/oracle-compose.sh ...`: o script inclui automaticamente a configuração de leitura do Drive quando o arquivo privado estiver instalado, evitando removê-la em atualizações futuras. As credenciais não são enviadas ao Git nem incluídas na imagem.
+
+## Conferência de pendências e formatos de horário
+
+Linhas sem nomes preenchidos não geram atividades nem pendências. A contagem é por ocorrência diária (linha e dia), somando os cinco blocos da semana. Pós-plantão explicitamente indicado no setor é exibido como descanso e contado separadamente das atividades sem horário válido. A lista administrativa de atividades incompletas permite filtrar por fonte/data e conferir setor, célula e valor original.
+
+Intervalos como `12-24` terminam às 00:00 do dia seguinte. Horários inválidos em linhas com nomes são preservados para conferência, sem derrubar a semana inteira. Um marcador da coluna A não apaga o último cabeçalho explícito de setor acima dos nomes. A correção foi validada nas quatro planilhas que falharam (06/07, 07/09, 21/12 e 28/12/2026), com transações de diagnóstico revertidas após a conferência.
+
+Para repetir somente algumas fontes, use `python manage.py sync_sheets ID_1 ID_2 --only`; essa opção não percorre a pasta nem reimporta as demais fontes. Na Oracle, pare o trabalhador periódico antes dessa execução e reative-o ao terminar, inclusive se houver falhas individuais.

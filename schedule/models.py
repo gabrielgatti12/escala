@@ -2,6 +2,13 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 from urllib.parse import quote
+import re
+import unicodedata
+
+def is_rest_sector(value):
+    value=unicodedata.normalize("NFKD",value).encode("ascii","ignore").decode().lower()
+    return "pos plantao" in re.sub(r"[^a-z0-9]+"," ",value)
+
 class Shift(models.Model):
     external_id = models.CharField(max_length=120, unique=True)
     wants_exchange = models.BooleanField(default=False)
@@ -81,6 +88,8 @@ class ResidentAccess(models.Model):
         return f'{self.account} → {self.resident.get_full_name() or self.resident.username}'
 
 class IncompleteActivity(models.Model):
+    @property
+    def is_rest(self): return is_rest_sector(self.sector)
     external_id = models.CharField(max_length=120,unique=True)
     source = models.CharField(max_length=100)
     source_cell = models.CharField(max_length=30)

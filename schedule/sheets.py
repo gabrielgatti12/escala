@@ -55,6 +55,10 @@ def parse_shift_hours(day,value):
 def sync_workbook(book, source):
     state,_=SyncState.objects.get_or_create(source=source)
     state=SyncState.objects.select_for_update().get(pk=state.pk)
+    from .changes import snapshot_source,notify_schedule_changes
+    previous_success=state.last_success
+    snapshot_time=timezone.now()
+    before=snapshot_source(source,now=snapshot_time) if previous_success else {}
     if 'Espelho Semanal' not in book.sheetnames:
         raise SheetFormatError('Aba Espelho Semanal ausente; nada foi alterado.')
     rows=list(book['Espelho Semanal'].values)
@@ -143,6 +147,8 @@ def sync_workbook(book, source):
     pending=SharedActivity.objects.filter(source=source,active=True,allocated_to__isnull=True).count()
     state.summary=f'{len(seen)} plantões definidos; {pending} alocações pendentes; {len(incomplete_seen)-rest_count} sem horário válido; {rest_count} registros de pós-plantão; {preserved+retained} trocas preservadas; {retained+assigned_obsolete} exigem conciliação.'
     state.save()
+    if previous_success:
+        notify_schedule_changes(source,before,snapshot_source(source,now=snapshot_time),previous_success=previous_success)
     return state.summary
 
 def workbook_week_label(book):

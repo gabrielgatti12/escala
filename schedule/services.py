@@ -4,14 +4,14 @@ from django.db.models import Q
 from django.utils import timezone
 from .models import Shift, Exchange
 
-def validate_pair(offered, requested, proposer, recipient):
+def validate_pair(offered, requested, proposer, recipient, now=None):
     if not offered.active or not requested.active:
         raise ValidationError('Um dos plantões foi removido da planilha.')
     if offered.pk == requested.pk or proposer.pk == recipient.pk:
         raise ValidationError('Escolha um plantão de outro residente.')
     if offered.resident_id != proposer.pk or requested.resident_id != recipient.pk:
         raise ValidationError('A titularidade dos plantões mudou. Crie uma nova solicitação.')
-    if min(offered.starts_at, requested.starts_at) <= timezone.now():
+    if min(offered.starts_at, requested.starts_at) <= (now or timezone.now()):
         raise ValidationError('Só é possível trocar plantões futuros.')
     for resident, incoming in [(proposer, requested), (recipient, offered)]:
         if Shift.objects.filter(active=True,resident=resident,starts_at__lt=incoming.ends_at,ends_at__gt=incoming.starts_at).exclude(pk__in=[offered.pk,requested.pk]).exists():
@@ -27,7 +27,10 @@ def propose_exchange(user, offered_id, requested_id):
     validate_pair(offered,requested,user,requested.resident)
     if Exchange.objects.filter(offered=offered,requested=requested,status='pending').exists():
         raise ValidationError('Já existe uma solicitação pendente para esta troca.')
-    return Exchange.objects.create(offered=offered,requested=requested,proposer=user,recipient=requested.resident)
+    exchange=Exchange.objects.create(offered=offered,requested=requested,proposer=user,recipient=requested.resident)
+    from .reminders import notify_request_created
+    notify_request_created(exchange)
+    return exchange
 
 @transaction.atomic
 def respond_exchange(user, pk, action):
@@ -52,6 +55,8 @@ def respond_exchange(user, pk, action):
         raise ValidationError('Você não pode realizar esta ação.')
     exchange.resolved_at = timezone.now()
     exchange.save(update_fields=['status','resolved_at'])
+    from .reminders import close_request_notifications
+    close_request_notifications(exchange,now=exchange.resolved_at)
     return exchange
 
 from .models import Allocation, SharedActivity
@@ -67,8 +72,8 @@ def expire_pending_requests(now=None):
         'allocations':allocations.update(status='cancelled',resolved_at=now) if allocations.exists() else 0,
     }
 
-def validate_allocation(user,mine,theirs):
-    if min(mine.starts_at,theirs.starts_at)<=timezone.now():
+def validate_allocation(user,mine,theirs,now=None):
+    if min(mine.starts_at,theirs.starts_at)<=(now or timezone.now()):
         raise ValidationError('Só é possível dividir atividades futuras.')
     if mine.pk==theirs.pk or timezone.localdate(mine.starts_at)!=timezone.localdate(theirs.starts_at):
         raise ValidationError('Escolha duas atividades distintas do mesmo dia.')
@@ -90,7 +95,10 @@ def propose_allocation(user,mine_id,theirs_id):
     recipient_id=validate_allocation(user,mine,theirs)
     if Allocation.objects.filter(mine=mine,theirs=theirs,proposer=user,status='pending').exists():
         raise ValidationError('Esta proposta já está pendente.')
-    return Allocation.objects.create(mine=mine,theirs=theirs,proposer=user,recipient_id=recipient_id)
+    allocation=Allocation.objects.create(mine=mine,theirs=theirs,proposer=user,recipient_id=recipient_id)
+    from .reminders import notify_request_created
+    notify_request_created(allocation)
+    return allocation
 
 @transaction.atomic
 def respond_allocation(user,pk,action):
@@ -116,6 +124,8 @@ def respond_allocation(user,pk,action):
     else: raise ValidationError('Você não pode realizar esta ação.')
     allocation.resolved_at=timezone.now()
     allocation.save(update_fields=['status','resolved_at'])
+    from .reminders import close_request_notifications
+    close_request_notifications(allocation,now=allocation.resolved_at)
     return allocation
 
 from .models import ExchangeTopic, ForumComment

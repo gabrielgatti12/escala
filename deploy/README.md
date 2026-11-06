@@ -13,7 +13,7 @@ DJANGO_CSRF_TRUSTED_ORIGINS=https://<IP-ou-dominio>
 TRUST_PROXY_HTTPS=1
 DJANGO_SSL_REDIRECT=1
 SHEET_IDS=<ID_DA_PLANILHA>
-SYNC_INTERVAL=300
+SYNC_INTERVAL=86400
 ```
 
 3. Execute a partir da raiz do projeto:
@@ -56,7 +56,7 @@ Para pastas privadas compartilhadas explicitamente com uma conta de serviço, a 
 docker compose -f deploy/compose.yaml -f deploy/compose.drive.yaml up -d
 ```
 
-A pasta será reexaminada a cada intervalo; todas as páginas da listagem são percorridas, com limites explícitos de 1000 pastas e 10000 planilhas. A descoberta só é salva após terminar sem erros. Somente arquivos nativos Google Sheets são descobertos; backups XLSX não são importados em duplicidade.
+A pasta será reexaminada a cada intervalo diário; todas as páginas da listagem são percorridas, com limites explícitos de 1000 pastas e 10000 planilhas. A descoberta só é salva após terminar sem erros. Somente arquivos nativos Google Sheets são descobertos; backups XLSX não são importados em duplicidade.
 
 Sem credencial Drive, planilhas públicas cadastradas individualmente por ID continuam funcionando. A API de listagem exige uma chave de API para a pasta pública ou uma credencial autenticada para a pasta privada. A descoberta real deve ser validada após configurar a credencial na instância; testes locais simulam a paginação e as respostas da API, sem provar acesso à pasta real.
 
@@ -75,3 +75,36 @@ bash scripts/oracle-compose.sh logs --tail=30 sync
 O serviço `sync` possui política de reinício `unless-stopped`. Docker precisa estar habilitado na inicialização, como já foi configurado na Oracle. O intervalo é contado após cada ciclo completo; a primeira importação de todas as pastas pode demorar mais. Para uma execução inicial com o acesso de leitura configurado, use `bash scripts/oracle-compose.sh run --rm sync python manage.py sync_sheets --registered`; não deixe um segundo sincronizador periódico rodando junto do serviço normal. Configure somente a pasta principal; a descoberta percorre as subpastas.
 
 O painel verifica novidades a cada 45 segundos e se atualiza quando o usuário não estiver escrevendo ou com uma janela de troca aberta. Essa consulta do navegador não inicia importações no Google e não substitui o serviço de sincronização.
+
+## Atualização com leitura diária, avisos e assinatura de calendário
+
+Esta versão acrescenta as migrações 0011–0013. O código continua com leitura do Google; não grava trocas nas planilhas originais. O banco local mantém as decisões aceitas. A escrita depende de permissão de editor e de uma credencial autorizada para escrita, ainda não configuradas.
+
+```bash
+cd /opt/escala-app &&
+git pull --ff-only origin codex/escala-inicial &&
+bash scripts/set-sync-interval.sh 86400 &&
+bash scripts/oracle-compose.sh build &&
+bash scripts/oracle-compose.sh stop sync &&
+bash scripts/oracle-compose.sh run --rm web python manage.py migrate --noinput &&
+bash scripts/oracle-compose.sh up -d &&
+bash scripts/oracle-compose.sh exec -T web python manage.py sync_status
+```
+
+Se a migração falhar, mantenha o trabalhador parado até resolver o erro. Não remova o volume `data`. Depois de corrigir a migração, `up -d` retoma os serviços. A alteração de intervalo preserva os demais campos e as permissões de `deploy/.env`, sem mostrar credenciais.
+
+O serviço lê todas as fontes no início e espera 86400 segundos depois do ciclo. A pausa tem consultas curtas apenas ao SQLite para o pedido manual, contato operacional e lembretes. O botão Atualizar agora antecipa a próxima leitura sem iniciar outro trabalhador concorrente. O contato continua sendo registrado durante a pausa; a interface sinaliza se ficar ausente por mais de 10 minutos.
+
+No Google Calendário, cada residente gera sua própria assinatura em Google Calendário → Gerar meu link privado. Adicionar em Outros calendários → Por URL no Google web cria uma assinatura, enquanto importar um arquivo ICS cria apenas uma cópia. O Google controla o intervalo de releitura e pode levar horas; o feed já expõe a escala atual assim que a troca é aceita. Revogar/renovar links interrompe novas consultas pelo link antigo e não apaga cópias previamente baixadas.
+
+Os avisos de importação começam a partir da próxima mudança efetiva em fontes já importadas. Importações iniciais e dados históricos não disparam avisos em massa. Solicitações são avisadas no envio; o lembrete é verificado localmente a cada cinco minutos depois de completar 24 horas sem resposta.
+
+### URLs privadas no proxy
+
+O Gunicorn usa `config.access_logging.SafeAccessLogger` para ocultar tokens das assinaturas e links de ativação nos logs. No Nginx existente, inclua a configuração abaixo **dentro do bloco `server` HTTPS da aplicação**, antes de usar assinaturas reais:
+
+```nginx
+include /opt/escala-app/deploy/nginx-private-calendars.conf;
+```
+
+Ela preserva o proxy e os cabeçalhos de HTTPS, desabilitando logs apenas nas rotas que carregam tokens privados. Depois, valide com `nginx -t` e aplique com `systemctl reload nginx`. Mantenha links externos em HTTPS. Se quiser evitar o registro de acessos acidentais por HTTP, desabilite também o access log do bloco HTTP que apenas redireciona para HTTPS. Não publique logs antigos com links de ativação ou assinatura; gere outro link se ele tiver sido exposto.

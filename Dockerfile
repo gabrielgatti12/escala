@@ -11,4 +11,4 @@ USER escala
 RUN python -c "import os,secrets; os.environ['DJANGO_DEBUG']='0'; os.environ['DJANGO_SECRET_KEY']=secrets.token_urlsafe(48); os.environ['DJANGO_SETTINGS_MODULE']='config.settings'; from django.core.management import execute_from_command_line; execute_from_command_line(['manage.py','collectstatic','--noinput'])"
 ENV DJANGO_DEBUG=0 DATABASE_PATH=/data/db.sqlite3
 EXPOSE 8000
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "1", "--threads", "4", "--access-logfile", "-", "--error-logfile", "-"]
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "1", "--threads", "4", "--access-logfile", "-", "--error-logfile", "-", "--logger-class", "config.access_logging.SafeAccessLogger"]

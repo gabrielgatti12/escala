@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-heading"><div><div class="eyebrow">SUA ESCALA NO CELULAR</div><h1>Conectar ao Google Calendário</h1><p class="muted">Assine sua escala por um link privado. As alterações do calendário final serão lidas pelo Google nas próximas atualizações.</p></div><a class="button secondary" href="{% url 'calendar' %}">Voltar ao calendário</a></div>
+{% if can_connect %}
+<section class="panel account-form">
+  <div class="panel-heading"><div><span class="eyebrow">SOMENTE A SUA ESCALA</span><h2>Assinatura privada</h2></div><span class="badge {% if subscription_enabled %}teal{% else %}gray{% endif %}">{% if subscription_enabled %}Ativa{% else %}Não conectada{% endif %}</span></div>
+  <p class="muted">O link inclui somente seus plantões com titular definido. Atividades com dois nomes ainda sem divisão e registros sem horário válido ficam disponíveis no painel. Nenhum e-mail dos residentes é incluído.</p>
+  {% if not confirmed_count %}<p class="consent-note">Ainda não há plantões definidos para você. A assinatura ficará vazia até que eles apareçam no calendário final.</p>{% endif %}
+  {% if feed_url %}
+  <label class="field-label" for="calendar-feed-url">Selecione e copie seu link privado<input id="calendar-feed-url" type="text" readonly value="{{ feed_url }}" autocomplete="off" spellcheck="false"></label>
+  {% elif subscription_enabled %}
+  <p class="consent-note">Você já tem uma assinatura ativa. Por privacidade, o link completo só é exibido na sessão em que foi gerado. Para recuperá-lo, gere um novo link e atualize a assinatura no Google.</p>
+  {% else %}
+  <p class="consent-note">Gere seu link para começar. Ele permite consultar sua escala sem fazer login; compartilhe apenas com o seu aplicativo de calendário.</p>
+  {% endif %}
+  <div class="form-bottom"><form method="post" action="{% url 'calendar_feed_create' %}">{% csrf_token %}<button class="button primary">{% if subscription_enabled %}Gerar novo link e invalidar o anterior{% else %}Gerar meu link privado{% endif %}</button></form>{% if subscription_enabled %}<form method="post" action="{% url 'calendar_feed_revoke' %}">{% csrf_token %}<button class="button secondary">Revogar assinatura</button></form>{% endif %}</div>
+  {% if subscription_enabled %}<p class="field-help">Revogar ou gerar outro link impede novas consultas pelo link anterior. Isso não apaga cópias já recebidas pelo Google; remova o calendário no Google se quiser excluí-las.</p>{% endif %}
+</section>
+<section class="panel account-form account-list">
+  <div class="panel-heading"><h2>Como assinar no Google</h2></div>
+  <ol class="muted"><li>Copie o link privado acima.</li><li>Abra o Google Calendário no navegador do computador.</li><li>Em <strong>Outros calendários</strong>, clique em <strong>+</strong> e depois em <strong>Por URL</strong>.</li><li>Cole o link e clique em <strong>Adicionar calendário</strong>. A assinatura aparecerá também no celular com a mesma conta Google.</li></ol>
+  <p class="muted">O Google escolhe quando reler a assinatura e pode levar horas para mostrar mudanças. Confira o painel para ver a escala mais recente. A assinatura é de leitura: edições no Google não alteram sua escala nem enviam pedidos de troca.</p>
+  <p class="field-help">O arquivo para baixar continua disponível em <a href="{% url 'calendar_ics' %}">Exportar minha escala</a>. Importar esse arquivo cria uma cópia, sem atualização automática.</p>
+</section>
+{% else %}
+<section class="panel account-form"><h2>Identifique seu residente primeiro</h2><p class="muted">Para conectar uma escala, sua conta precisa estar vinculada a um residente ativo da planilha.{% if user.is_superuser %} Selecione seu nome na opção de vínculo da página inicial.{% else %} Peça ao administrador para conferir seu vínculo de acesso.{% endif %}</p><a class="button secondary" href="{% url 'dashboard' %}">Voltar à minha escala</a></section>
+{% endif %}
+{% endblock %}

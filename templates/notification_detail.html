@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block content %}
+<a class="text-link forum-back" href="{% url 'notifications' %}">← Voltar aos avisos</a>
+<div class="page-heading"><div><div class="eyebrow">{{ notification.get_kind_display|upper }}</div><h1>{{ notification.title }}</h1><p class="muted">{{ notification.display_at|date:'d/m/Y · H:i' }}</p></div>{% if not notification.read_at %}<form method="post" action="{% url 'notification_read' notification.pk %}">{% csrf_token %}<input type="hidden" name="detail" value="1"><button class="button secondary">Marcar como lido</button></form>{% endif %}</div>
+<section class="panel notification-detail"><p>{{ notification.message }}</p>
+{% for change in changes %}<article class="schedule-change"><h2>{{ change.label }}</h2><div class="change-comparison"><div><h3>Antes</h3>{% if change.before %}{% include 'components/change_activity.html' with activity=change.before %}{% else %}<p class="muted">Não constava na sua escala.</p>{% endif %}</div><div><h3>Agora</h3>{% if change.after %}{% include 'components/change_activity.html' with activity=change.after %}{% else %}<p class="muted">Não consta mais na sua escala.</p>{% endif %}</div></div></article>{% endfor %}
+{% if truncated %}<div class="notice">Este resumo mostra até 20 alterações. Confira a semana completa para ver a escala atual.</div>{% endif %}
+{% if notification_link %}<a class="button primary" href="{{ notification_link }}">{% if notification.kind == 'schedule' %}Conferir minha escala{% else %}Abrir solicitações{% endif %}{% include 'components/icon.html' with name='arrow' %}</a>{% endif %}</section>
+{% endblock %}

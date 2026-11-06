@@ -1,5 +1,37 @@
 from django.contrib import admin
 from django.urls import path, include
-from schedule import views
+from schedule import views, calendar_feeds, notifications, source_actions
 from django.views.generic import TemplateView
-urlpatterns = [path('contas/importar/',views.import_resident_contacts,name='import_resident_contacts'),path('contas/<int:pk>/primeiro-acesso/',views.account_activation_link,name='account_activation_link'),path('ativar/<uidb64>/<token>/',views.ActivateResidentAccount.as_view(success_url='/primeiro-acesso/concluido/'),name='activate_account'),path('primeiro-acesso/concluido/',TemplateView.as_view(template_name='registration/activation_complete.html'),name='activation_complete'),path('contas/criar/',views.create_resident_account,name='create_resident_account'),path('dados/status/',views.live_status,name='live_status'),path('mural/',views.forum,name='forum'),path('mural/<int:pk>/',views.forum_topic,name='forum_topic'),path('mural/<int:pk>/comentar/',views.forum_comment,name='forum_comment'),path('mural/<int:pk>/retirar/',views.forum_withdraw,name='forum_withdraw'),path('fontes/adicionar/',views.register_source,name='register_source'),path('conta/vincular/',views.link_resident,name='link_resident'),path('calendario/',views.calendar_view,name='calendar'),path('calendario.ics',views.calendar_ics,name='calendar_ics'),path('divisoes/criar/',views.allocation_propose,name='allocation_propose'),path('divisoes/<int:pk>/<str:action>/',views.allocation_respond,name='allocation_respond'),path('plantoes/<int:pk>/interesse/',views.toggle_interest,name='interest'),path('admin/', admin.site.urls),path('accounts/',include('django.contrib.auth.urls')),path('',views.dashboard,name='dashboard'),path('trocas/criar/',views.propose,name='propose'),path('trocas/<int:pk>/<str:action>/',views.respond,name='respond')]
+urlpatterns = [
+    path('fontes/atualizar/',source_actions.request_source_refresh,name='request_source_refresh'),
+    path('calendario/conectar/',calendar_feeds.connections,name='calendar_connections'),
+    path('calendario/conectar/gerar/',calendar_feeds.rotate,name='calendar_feed_create'),
+    path('calendario/conectar/revogar/',calendar_feeds.revoke,name='calendar_feed_revoke'),
+    path('calendario/assinatura/<str:token>/',calendar_feeds.feed,name='calendar_feed'),
+    path('avisos/',notifications.notification_list,name='notifications'),
+    path('avisos/ler-todos/',notifications.notifications_read_all,name='notifications_read_all'),
+    path('avisos/<int:pk>/',notifications.notification_detail,name='notification_detail'),
+    path('avisos/<int:pk>/lido/',notifications.notification_read,name='notification_read'),
+    path('contas/importar/',views.import_resident_contacts,name='import_resident_contacts'),
+    path('contas/<int:pk>/primeiro-acesso/',views.account_activation_link,name='account_activation_link'),
+    path('ativar/<uidb64>/<token>/',views.ActivateResidentAccount.as_view(success_url='/primeiro-acesso/concluido/'),name='activate_account'),
+    path('primeiro-acesso/concluido/',TemplateView.as_view(template_name='registration/activation_complete.html'),name='activation_complete'),
+    path('contas/criar/',views.create_resident_account,name='create_resident_account'),
+    path('dados/status/',views.live_status,name='live_status'),
+    path('mural/',views.forum,name='forum'),
+    path('mural/<int:pk>/',views.forum_topic,name='forum_topic'),
+    path('mural/<int:pk>/comentar/',views.forum_comment,name='forum_comment'),
+    path('mural/<int:pk>/retirar/',views.forum_withdraw,name='forum_withdraw'),
+    path('fontes/adicionar/',views.register_source,name='register_source'),
+    path('conta/vincular/',views.link_resident,name='link_resident'),
+    path('calendario/',views.calendar_view,name='calendar'),
+    path('calendario.ics',views.calendar_ics,name='calendar_ics'),
+    path('divisoes/criar/',views.allocation_propose,name='allocation_propose'),
+    path('divisoes/<int:pk>/<str:action>/',views.allocation_respond,name='allocation_respond'),
+    path('plantoes/<int:pk>/interesse/',views.toggle_interest,name='interest'),
+    path('admin/', admin.site.urls),
+    path('accounts/',include('django.contrib.auth.urls')),
+    path('',views.dashboard,name='dashboard'),
+    path('trocas/criar/',views.propose,name='propose'),
+    path('trocas/<int:pk>/<str:action>/',views.respond,name='respond'),
+]

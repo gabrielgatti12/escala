@@ -14,7 +14,7 @@ python -m venv /workspace/.escala-venv
 bash scripts/dev-start.sh
 ```
 
-O servidor de desenvolvimento escuta a porta 8000 no loopback. O script também inicia a sincronização a cada 300 segundos e encerra os dois processos ao sair. Não é um servidor de produção.
+O servidor de desenvolvimento escuta a porta 8000 no loopback. O script também inicia a sincronização diária (86400 segundos) e encerra os dois processos ao sair. Não é um servidor de produção.
 
 No painel `/admin/`, o administrador pode habilitar o acesso dos residentes definindo senhas individuais. As identidades importadas são criadas com senha inutilizável; não há senha padrão, cadastro público nem conta administrativa automática. Não publique o banco de dados ou credenciais no Git. A recuperação de senha por email ainda não está configurada; contate o administrador.
 
@@ -22,7 +22,7 @@ No painel `/admin/`, o administrador pode habilitar o acesso dos residentes defi
 
 ```bash
 /workspace/.escala-venv/bin/python manage.py sync_sheets ID_DA_PLANILHA
-/workspace/.escala-venv/bin/python manage.py sync_sheets ID_1 ID_2 --interval 300
+/workspace/.escala-venv/bin/python manage.py sync_sheets ID_1 ID_2 --interval 86400
 ```
 
 O ID é o trecho entre `/d/` e `/edit` no link. `SHEET_IDS` aceita IDs separados por espaços e `SYNC_INTERVAL` define o intervalo do script de desenvolvimento. Configure os IDs no ambiente; sem `SHEET_IDS`, o sincronizador usa as fontes já cadastradas no banco. O endereço da planilha não é incorporado ao código. O comando mantém as fontes em `SheetSource` e reúne todas as semanas cadastradas. Para descoberta das pastas mensais do Drive, veja `deploy/README.md`. A exportação direta exige leitura pelo link; pastas privadas podem usar a integração de conta de serviço descrita em `deploy/README.md`. O adaptador usa exportação HTTPS de leitura e nunca altera o Google Sheets.
@@ -35,7 +35,7 @@ O ID é o trecho entre `/d/` e `/edit` no link. `SHEET_IDS` aceita IDs separados
 - Cada fonte é sincronizada em uma transação. Falhas preservam a última importação; o trabalhador periódico registra a falha e tenta novamente no próximo intervalo. A interface mostra a última atualização bem-sucedida.
 - As contas são identificadas por nome normalizado com sufixo de hash. Pessoas homônimas ou mudanças de nome exigem mapeamento administrativo; não use contas compartilhadas.
 
-O calendário semanal mostra plantões definidos, atividades da dupla ainda pendentes e atividades sem horário. O calendário mensal e a exportação ICS contêm somente plantões definidos. Esta versão não interpreta automaticamente férias, feriados, exceções ou células sem horário como plantões trocáveis. A semana do espelho da planilha de exemplo é histórica; use os filtros para consultá-la. Para solicitar trocas são necessários plantões futuros.
+O calendário semanal mostra plantões definidos, atividades da dupla ainda pendentes e atividades sem horário. O calendário mensal, a exportação ICS e a assinatura privada contêm somente plantões definidos. Esta versão não interpreta automaticamente férias, feriados, exceções ou células sem horário como plantões trocáveis. A semana do espelho da planilha de exemplo é histórica; use os filtros para consultá-la. Para solicitar trocas são necessários plantões futuros.
 
 ## CSV / Excel tabular alternativo
 
@@ -43,7 +43,7 @@ O calendário semanal mostra plantões definidos, atividades da dupla ainda pend
 /workspace/.escala-venv/bin/python manage.py import_schedule /caminho/escala.csv
 ```
 
-Colunas: `id,residente,inicio,fim,setor`. `residente` é o nome de usuário de uma conta ativa já cadastrada; datas em ISO 8601 (por exemplo `2026-12-01T08:00:00-03:00`). XLSX usa a primeira aba e cabeçalhos na primeira linha. Sem fuso explícito, usa America/Sao_Paulo. A importação é transacional e repetível. Não remove automaticamente linhas ausentes. `--interval 300` relê um arquivo local atualizado por outro processo.
+Colunas: `id,residente,inicio,fim,setor`. `residente` é o nome de usuário de uma conta ativa já cadastrada; datas em ISO 8601 (por exemplo `2026-12-01T08:00:00-03:00`). XLSX usa a primeira aba e cabeçalhos na primeira linha. Sem fuso explícito, usa America/Sao_Paulo. A importação é transacional e repetível. Não remove automaticamente linhas ausentes. `--interval 86400` relê um arquivo local atualizado por outro processo.
 
 ## Limites e implantação
 
@@ -51,7 +51,7 @@ O ambiente preparado é de desenvolvimento. Antes de disponibilizar a residentes
 
 Para produção, `DJANGO_DEBUG=0`, `DJANGO_SECRET_KEY` forte e `DJANGO_ALLOWED_HOSTS` são obrigatórios. `DATABASE_PATH` permite escolher o arquivo SQLite. Não exponha o servidor de desenvolvimento publicamente.
 
-A dupla decide a divisão entre si, pelo fluxo de proposta e aceite no aplicativo. Não há decisão automática baseada na posição dos nomes. O calendário final é a visão `/calendario/` do aplicativo. A exportação `/calendario.ics` inclui somente plantões definidos do usuário conectado; ela é um arquivo estático, que deve ser reexportado após alterações. Não há sincronização de escrita com Google Calendar nem com Google Sheets.
+A dupla decide a divisão entre si, pelo fluxo de proposta e aceite no aplicativo. Não há decisão automática baseada na posição dos nomes. O calendário final é a visão `/calendario/` do aplicativo. A exportação `/calendario.ics` é um arquivo estático. Em Google Calendário, o usuário pode gerar uma assinatura privada que reflete os plantões definidos e pode ser revogada. O Google decide quando reler o link; o painel continua sendo a referência imediata. Não há escrita nas planilhas Google Sheets.
 
 ## Interface e cadastro de novas semanas
 
@@ -69,7 +69,7 @@ O percurso publicar → comentar → propor → aceitar → atualizar calendári
 
 ## Atualização contínua
 
-O trabalhador faz um ciclo de descoberta das pastas configuradas e importação das fontes ativas; ao terminar, aguarda `SYNC_INTERVAL` (300 segundos por padrão) antes do próximo ciclo. A duração de cada importação se soma ao intervalo. Na primeira execução, a descoberta registra os arquivos Google Sheets das subpastas mensais; novas semanas entram no cadastro nos próximos ciclos. Cada fonte é importada em uma transação, com falhas registradas no cadastro e dados anteriores preservados.
+O trabalhador faz um ciclo de descoberta das pastas configuradas e importação das fontes ativas; ao terminar, aguarda `SYNC_INTERVAL` (86400 segundos, ou 24 horas, por padrão) antes do próximo ciclo. A duração de cada importação se soma ao intervalo. Na primeira execução, a descoberta registra os arquivos Google Sheets das subpastas mensais; novas semanas entram no cadastro nos próximos ciclos. Cada fonte é importada em uma transação, com falhas registradas no cadastro e dados anteriores preservados.
 
 O navegador autenticado verifica a revisão dos dados a cada 45 segundos enquanto a aba está visível. Quando há novidades e a página está livre, ela recarrega mantendo a URL e os filtros. Se houver formulário alterado, campo em uso ou janela aberta, aparece um aviso para atualizar quando terminar; comentários em edição não são apagados automaticamente. O endpoint de status só fornece uma revisão, sem conteúdo das escalas.
 
@@ -108,3 +108,17 @@ A página de prévia e a geração de links são exclusivas de superusuários. R
 ## Revisão funcional
 
 As correções, validações e próximas melhorias estão em [docs/revisao-funcional.md](docs/revisao-funcional.md). A revisão de 25/10/2026 passou em 103 testes e validou os fluxos de troca e divisão no navegador com dados fictícios.
+
+## Calendário, avisos e leitura diária
+
+Em Google Calendário, gere o link privado e adicione-o no Google como Outros calendários → Por URL. A assinatura é somente da própria escala definida e acompanha as alterações nas próximas consultas do Google; não exige habilitar OAuth nem fornecer uma chave pessoal para essa função. Um novo link invalida o anterior, e a revogação impede novas consultas. As assinaturas dependem da conta criadora e do vínculo atual com o residente.
+
+Avisos reúne alterações reais das importações, com antes/depois de horário e setor, e solicitações recebidas. A primeira importação de uma fonte estabelece a referência sem notificar todo o histórico. Pedidos pendentes válidos recebem lembrete depois de 24 horas; no máximo uma renovação por dia. Os lembretes são internos, sem envio por e-mail.
+
+A interface consulta o SQLite local. A leitura automática das planilhas agora ocorre a cada 24 horas após o ciclo completo, com opção administrativa Atualizar agora em Planilhas e fontes. Durante a espera, o trabalhador só consulta o banco local: registra contato a cada 30 segundos e verifica lembretes a cada cinco minutos. Atualizar a página não acessa o Google. Trocas aceitas aparecem imediatamente no aplicativo e no conteúdo da assinatura, sem esperar a leitura diária; a exibição no Google depende da releitura feita por ele.
+
+Para instalações existentes, altere o intervalo com `bash scripts/set-sync-interval.sh 86400` antes de recriar o serviço; um `SYNC_INTERVAL=300` já salvo não muda só com a atualização do código. O comando `python manage.py sync_status` e a tela de fontes mostram o último contato, progresso, falhas e próxima tentativa prevista.
+
+A gravação nas planilhas originais aguarda permissão de editor e credencial Google de escrita. A chave de API pública configurada serve à leitura; as decisões continuam preservadas no banco. A integração da cobertura do pós-plantão fica para uma etapa posterior.
+
+Validação desta versão: 179 testes passaram, incluindo assinatura privada, CSRF, avisos por residente, leitura diária e atualização manual. O navegador validou geração/revogação de assinatura, antes/depois e lembretes no celular com dados fictícios. A inclusão do link em uma conta Google é feita pelo próprio residente; o Google controla quando relê a assinatura. A implantação na Oracle e o ajuste do proxy estão descritos em `deploy/README.md`.

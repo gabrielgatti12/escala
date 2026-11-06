@@ -140,7 +140,7 @@ class WorkflowTests(TestCase):
         self.assertEqual(SharedActivity.objects.filter(source='paired-source').count(),2)
     def allocation_pair(self):
         from .models import SharedActivity
-        start=self.start+timedelta(days=10)
+        start=timezone.localtime(self.start+timedelta(days=10)).replace(hour=8,minute=0,second=0,microsecond=0)
         mine=SharedActivity.objects.create(external_id='shared-one',source='test',starts_at=start,ends_at=start+timedelta(hours=6),sector='Ambulatório')
         theirs=SharedActivity.objects.create(external_id='shared-two',source='test',starts_at=start,ends_at=start+timedelta(hours=3),sector='Wet lab')
         mine.residents.set([self.a,self.b]);theirs.residents.set([self.a,self.b])

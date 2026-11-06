@@ -97,6 +97,13 @@ def dashboard(request,account_form=None):
             displayed_exchanges=pending_exchanges.filter(**{role:person})
             displayed_allocations=pending_allocations.filter(**{role:person})
     access_accounts=[];direct_accounts=[]
+    sync_health_status=None
+    if tab=='sources':
+        import os
+        from .monitoring import sync_health
+        try:interval=int(os.environ.get('SYNC_INTERVAL','86400'))
+        except ValueError:interval=86400
+        sync_health_status=sync_health(interval=interval)
     if tab=='accounts':
         from .forms import ResidentAccountForm
         from .models import ResidentAccess
@@ -110,7 +117,7 @@ def dashboard(request,account_form=None):
         'future_count':future.count(),'has_offered':future.filter(resident=person).exists(),'has_requested':future.exclude(resident=person).exists(),
         'offered':future.filter(resident=person),'requested':future.exclude(resident=person),'bounds':bounds,
         'exchanges':displayed_exchanges[:100],'recent_exchanges':exchanges[:4],'allocations':displayed_allocations[:100],'my_shared':my_shared,'allocation_options':allocation_options,'allocation_eligible_ids':allocation_eligible_ids,
-        'latest_sync':SyncState.objects.order_by('-last_success').first(),'source_cards':source_cards,'drive_folders':DriveFolder.objects.all() if request.user.is_superuser else [],
+        'latest_sync':SyncState.objects.filter(last_success__isnull=False).order_by('-last_success').first(),'source_cards':source_cards,'drive_folders':DriveFolder.objects.all() if request.user.is_superuser else [],'sync_health':sync_health_status,
     })
 @login_required
 @require_POST
@@ -193,15 +200,11 @@ def calendar_view(request):
 @login_required
 def calendar_ics(request):
     from django.http import HttpResponse
-    from datetime import timezone as utc
-    def escape(text):
-        return text.replace('\\','\\\\').replace('\n','\\n').replace(';','\\;').replace(',','\\,').replace('\r','')
-    lines=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Escala//Residencia//PT','CALSCALE:GREGORIAN']
-    for shift in Shift.objects.filter(active=True,resident=resident_for_account(request.user)):
-        lines += ['BEGIN:VEVENT',f'UID:shift-{shift.pk}@escala',f'DTSTAMP:{timezone.now().astimezone(utc.utc):%Y%m%dT%H%M%SZ}',f'DTSTART:{shift.starts_at.astimezone(utc.utc):%Y%m%dT%H%M%SZ}',f'DTEND:{shift.ends_at.astimezone(utc.utc):%Y%m%dT%H%M%SZ}',f'SUMMARY:{escape(shift.sector)}','END:VEVENT']
-    lines+=['END:VCALENDAR']
-    response=HttpResponse('\r\n'.join(lines)+'\r\n',content_type='text/calendar; charset=utf-8')
+    from .calendar_feeds import serialize_calendar
+    shifts=Shift.objects.filter(active=True,resident=resident_for_account(request.user))
+    response=HttpResponse(serialize_calendar(shifts),content_type='text/calendar; charset=utf-8')
     response['Content-Disposition']='attachment; filename="minha-escala.ics"'
+    response['Cache-Control']='private, no-store'
     return response
 
 @login_required
@@ -253,7 +256,7 @@ def register_source(request):
         source,created=SheetSource.objects.get_or_create(spreadsheet_id=sheet_id,defaults={'name':request.POST.get('name','').strip()[:200]})
         if not source.enabled:
             source.enabled=True;source.save(update_fields=['enabled'])
-        messages.success(request,'Planilha cadastrada. A sincronização acontecerá no próximo ciclo; o prazo depende da quantidade de fontes.')
+        messages.success(request,'Planilha cadastrada para a próxima leitura diária. Use Atualizar agora para antecipar.')
     return redirect('/?tab=sources')
 
 
@@ -322,7 +325,7 @@ def forum_withdraw(request,pk):
 def live_status(request):
     from django.http import JsonResponse
     from .live import data_revision
-    response=JsonResponse({'revision':data_revision()})
+    response=JsonResponse({'revision':data_revision(resident_for_account(request.user))})
     response['Cache-Control']='private, no-store'
     return response
 

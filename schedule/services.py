@@ -84,7 +84,11 @@ def validate_allocation(user,mine,theirs,now=None):
         raise ValidationError('As duas atividades devem pertencer à mesma dupla.')
     if any(not a.active or a.allocated_to_id for a in [mine,theirs]):
         raise ValidationError('Uma das atividades já foi definida ou removida.')
-    return next(pk for pk in participants if pk!=user.pk)
+    recipient_id=next(pk for pk in participants if pk!=user.pk)
+    for activity,owner_id in [(mine,user.pk),(theirs,recipient_id)]:
+        if Shift.objects.filter(active=True,resident_id=owner_id,starts_at__lt=activity.ends_at,ends_at__gt=activity.starts_at).exists():
+            raise ValidationError('A divisão causaria conflito com um plantão já confirmado.')
+    return recipient_id
 
 @transaction.atomic
 def propose_allocation(user,mine_id,theirs_id):

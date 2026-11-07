@@ -6,6 +6,7 @@
   const requested = document.getElementById('exchange-requested');
   const mine = document.getElementById('allocation-mine');
   const theirs = document.getElementById('allocation-theirs');
+  const allocationDay = document.getElementById('allocation-day');
   const searches = [...document.querySelectorAll('[data-filter-select]')];
   const normalize = value => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
   function filterShifts(input) {
@@ -27,22 +28,35 @@
     input.addEventListener('input', () => filterShifts(input));
     filterShifts(input);
   });
+  function updateAllocationSubmit() {
+    if (mine && theirs) document.getElementById('allocation-submit').disabled = !mine.value || !theirs.value || theirs.disabled;
+  }
   function filterActivities() {
     if (!mine || !theirs) return;
     const choice = mine.selectedOptions[0];
-    let available = 0;
+    const available = [];
     for (const option of theirs.options) {
       if (!option.value) continue;
-      const matches = !!mine.value && option.value !== mine.value && option.dataset.pair === choice.dataset.pair && option.dataset.day === choice.dataset.day && Date.parse(option.dataset.start) < Date.parse(choice.dataset.end) && Date.parse(choice.dataset.start) < Date.parse(option.dataset.end);
-      if (matches) available += 1;
+      const matches = !!mine.value && option.value !== mine.value && option.dataset.pair === choice.dataset.pair && option.dataset.day === allocationDay.value && option.dataset.day === choice.dataset.day && Date.parse(option.dataset.start) < Date.parse(choice.dataset.end) && Date.parse(choice.dataset.start) < Date.parse(option.dataset.end);
+      if (matches) available.push(option);
       option.hidden = !matches;
       option.disabled = !matches;
     }
-    theirs.value = '';
-    theirs.disabled = available === 0;
-    theirs.options[0].textContent = available ? 'Selecione a atividade do colega' : 'Sem outra atividade compatível';
-    document.getElementById('allocation-submit').disabled = available === 0;
-    document.getElementById('allocation-help').hidden = !mine.value || available > 0;
+    theirs.value = available.length === 1 ? available[0].value : '';
+    theirs.disabled = available.length === 0;
+    theirs.options[0].textContent = available.length ? 'Selecione a atividade do colega' : 'Sem outra atividade compatível neste dia';
+    document.getElementById('allocation-help').hidden = !mine.value || available.length > 0;
+    updateAllocationSubmit();
+  }
+  function filterAllocationDay() {
+    for (const option of mine.options) {
+      if (!option.value) continue;
+      const matches = option.dataset.day === allocationDay.value && (!allocation.dataset.pair || option.dataset.pair === allocation.dataset.pair);
+      option.hidden = !matches;
+      option.disabled = !matches;
+      if (!matches && option.selected) mine.value = '';
+    }
+    filterActivities();
   }
   document.querySelectorAll('[data-open-exchange]').forEach(button => {
     button.addEventListener('click', () => {
@@ -56,12 +70,17 @@
   document.querySelectorAll('[data-open-allocation]').forEach(button => {
     button.addEventListener('click', () => {
       if (!allocation) return;
-      mine.value = button.dataset.mine || '';
-      filterActivities();
+      const selected = [...mine.options].find(option => option.value === button.dataset.mine);
+      allocation.dataset.pair = selected?.dataset.pair || '';
+      allocationDay.value = selected?.dataset.day || [...mine.options].find(option => option.value)?.dataset.day || '';
+      mine.value = selected?.value || '';
+      filterAllocationDay();
       allocation.showModal();
     });
   });
   if (mine) mine.addEventListener('change', filterActivities);
+  if (theirs) theirs.addEventListener('change', updateAllocationSubmit);
+  if (allocationDay) allocationDay.addEventListener('change', () => { mine.value = ''; filterAllocationDay(); });
   document.querySelectorAll('[data-close-dialog]').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
   document.querySelectorAll('dialog').forEach(dialog => {
     dialog.addEventListener('click', event => {

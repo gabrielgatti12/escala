@@ -87,7 +87,7 @@ Atividades em sequência (por exemplo, Sala Dr. Pedro 08–12 e Patologia 13–1
 
 ## Setores, logins e solicitações
 
-O calendário semanal abre em Por setor: setores nas linhas e dias nas colunas, seguindo a ordem das células de origem. Por dia continua disponível. A mesma identidade de cor pastel é mantida nos cartões e agrupamentos mensais, independente do residente ou situação do plantão. Os rótulos continuam indicando pendências e interesse em troca. Nomes e cores são normalizados para manter consistência de espaços, maiúsculas e acentos; as fontes não são alteradas.
+O calendário semanal abre em Por dia. Por setor continua disponível, com setores nas linhas e dias nas colunas, seguindo a ordem das células de origem. A mesma identidade de cor pastel é mantida nos cartões e agrupamentos mensais, independente do residente ou situação do plantão. Os rótulos continuam indicando pendências e interesse em troca. Nomes e cores são normalizados para manter consistência de espaços, maiúsculas e acentos; as fontes não são alteradas.
 
 Solicitações separa Recebidas, Enviadas e Histórico. A confirmação ou recusa é feita pelo destinatário autenticado dentro do aplicativo. Enviar confirma a parte do solicitante; somente o aceite do destinatário altera as duas titularidades. Solicitações enviadas podem ser canceladas enquanto pendentes. O endereço antigo `?tab=exchanges` continua funcionando.
 

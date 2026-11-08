@@ -3,7 +3,7 @@ from .models import Shift,Exchange
 @admin.register(Shift)
 class ShiftAdmin(admin.ModelAdmin):
     list_display = ['external_id','resident','starts_at','ends_at','sector']
-    list_filter = ['sector','resident']
+    list_filter = ['category','resident_group','requires_reconciliation','sector','resident']
     readonly_fields = ['wants_exchange']
 @admin.register(Exchange)
 class ExchangeAdmin(admin.ModelAdmin):
@@ -41,9 +41,9 @@ class DriveFolderAdmin(admin.ModelAdmin):
     readonly_fields=['last_success','error']
 @admin.register(SheetSource)
 class SheetSourceAdmin(admin.ModelAdmin):
-    list_display=['name','spreadsheet_id','folder','enabled','error']
-    readonly_fields=['error']
-    list_filter=['enabled','folder']
+    list_display=['name','format','spreadsheet_id','folder','enabled','error']
+    readonly_fields=['error','warnings']
+    list_filter=['enabled','format','folder']
 @admin.register(IncompleteActivity)
 class IncompleteActivityAdmin(admin.ModelAdmin):
     list_display=['date','sector','source_cell','raw_time']

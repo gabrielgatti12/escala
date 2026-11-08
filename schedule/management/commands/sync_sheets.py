@@ -16,6 +16,7 @@ class Command(BaseCommand):
         parser.add_argument('--interval',type=int,default=0)
         parser.add_argument('--registered',action='store_true')
         parser.add_argument('--only',action='store_true',help='Importa somente os IDs informados, sem descoberta de pastas.')
+        parser.add_argument('--format',choices=['weekly','cinderelas'],help='Formato para cadastrar os IDs informados.')
     def handle(self,sheet_ids,interval,registered,only,**options):
         if only and not sheet_ids: raise CommandError('--only exige IDs de planilhas.')
         if interval and interval<30: raise CommandError('Intervalo mínimo: 30 segundos.')
@@ -23,7 +24,12 @@ class Command(BaseCommand):
         for sheet_id in sheet_ids:
             from schedule.drive import valid_id
             valid_id(sheet_id)
-            SheetSource.objects.get_or_create(spreadsheet_id=sheet_id)
+            source,_=SheetSource.objects.get_or_create(spreadsheet_id=sheet_id,defaults={'format':options.get('format') or 'weekly'})
+            if options.get('format') and source.format!=options['format']:
+                from schedule.models import SyncState
+                if SyncState.objects.filter(source=sheet_id,last_success__isnull=False).exists():
+                    raise CommandError('A fonte já foi importada com outro formato; revise o cadastro antes de alterar.')
+                source.format=options['format'];source.save(update_fields=['format'])
         session=None
         try:
             while True:
@@ -65,14 +71,18 @@ class Command(BaseCommand):
                                 from schedule.drive import authenticated_session
                                 session=authenticated_session()
                             if getattr(session,'public_drive',False):
-                                book=fetch_workbook(source.spreadsheet_id)
+                                book=fetch_workbook(source.spreadsheet_id,inspect_formulas=True) if source.format=='cinderelas' else fetch_workbook(source.spreadsheet_id)
                             else:
                                 from schedule.drive import fetch_private_workbook
-                                book=fetch_private_workbook(session,source.spreadsheet_id)
+                                book=fetch_private_workbook(session,source.spreadsheet_id,inspect_formulas=True) if source.format=='cinderelas' else fetch_private_workbook(session,source.spreadsheet_id)
                         else:
-                            book=fetch_workbook(source.spreadsheet_id)
-                        summary=sync_workbook(book,source.spreadsheet_id)
-                        if not source.name: source.name=workbook_week_label(book)
+                            book=fetch_workbook(source.spreadsheet_id,inspect_formulas=True) if source.format=='cinderelas' else fetch_workbook(source.spreadsheet_id)
+                        if source.format=='cinderelas':
+                            from schedule.cinderelas_import import sync_cinderelas
+                            summary=sync_cinderelas(book,source.spreadsheet_id)
+                        else:
+                            summary=sync_workbook(book,source.spreadsheet_id)
+                        if not source.name: source.name='Cinderelas 18–24' if source.format=='cinderelas' else workbook_week_label(book)
                         source.error='';source.save(update_fields=['name','error'])
                         self.stdout.write(summary)
                     except Exception as error:

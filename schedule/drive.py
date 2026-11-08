@@ -71,7 +71,7 @@ def discover_folder(session,folder):
     folder.last_success=timezone.now();folder.error='';folder.save(update_fields=['last_success','error'])
     return len(sheets)
 
-def fetch_private_workbook(session,spreadsheet_id):
+def fetch_private_workbook(session,spreadsheet_id, *, inspect_formulas=False):
     spreadsheet_id=valid_id(spreadsheet_id)
     with session.get(f'{API}/files/{spreadsheet_id}/export',params={'mimeType':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},timeout=60,stream=True) as response:
         response.raise_for_status()
@@ -80,4 +80,5 @@ def fetch_private_workbook(session,spreadsheet_id):
             data.write(chunk)
             if data.tell()>20*1024*1024: raise ValueError('Planilha excede o limite de 20 MB.')
         data.seek(0)
-        return load_workbook(data,read_only=True,data_only=True)
+        from .sheets import load_export
+        return load_export(data.getvalue(),inspect_formulas=inspect_formulas)

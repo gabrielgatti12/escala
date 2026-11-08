@@ -55,6 +55,7 @@ def activity_details(value):
         'confirmed': 'Titularidade definida', 'shared_pending': 'A combinar pela dupla',
         'allocated_to_you': 'Divisão definida para você', 'allocated_to_colleague': 'Definida para o colega',
         'rest': 'Descanso após plantão', 'time_unknown': 'Horário não definido',
+        'reconciliation_required': 'Decisão preservada; conferir alteração na fonte',
     }.get(value.get('status'), value.get('status', ''))
     return result
 

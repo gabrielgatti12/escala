@@ -29,6 +29,7 @@ def _timed_record(activity, kind, status):
         'sector': activity.sector,
         'status': status,
         '_cell': activity.source_cell,
+        '_tab': activity.source_tab,
     }
 
 
@@ -43,7 +44,7 @@ def snapshot_source(source, *, now=None):
     today = timezone.localdate(now)
     result = defaultdict(list)
     for shift in Shift.objects.filter(source=source, active=True, ends_at__gt=now):
-        result[shift.resident_id].append(_timed_record(shift, 'shift', 'confirmed'))
+        result[shift.resident_id].append(_timed_record(shift, 'shift', 'reconciliation_required' if shift.requires_reconciliation else 'confirmed'))
     for activity in SharedActivity.objects.filter(
         source=source, active=True, ends_at__gt=now,
     ).prefetch_related('residents'):
@@ -70,6 +71,7 @@ def snapshot_source(source, *, now=None):
                 'raw_time': activity.raw_time,
                 'status': 'rest' if activity.is_rest else 'time_unknown',
                 '_cell': activity.source_cell,
+                '_tab': activity.source_tab,
                 '_participants': participants,
             })
     return dict(result)
@@ -79,7 +81,7 @@ def _semantic_key(record):
     # Cell position helps pair an edit for presentation, but moving an otherwise
     # equal entry must not notify its resident.
     return json.dumps(
-        {key: value for key, value in record.items() if key != '_cell'},
+        {key: value for key, value in record.items() if key not in ['_cell','_tab']},
         sort_keys=True, ensure_ascii=False,
     )
 
@@ -114,7 +116,7 @@ def _changes(before, after):
     changes = []
     for record in removed:
         match = next((candidate for candidate in added
-                      if record.get('_cell') and candidate.get('_cell') == record['_cell']), None)
+                      if record.get('_cell') and candidate.get('_cell') == record['_cell'] and candidate.get('_tab') == record.get('_tab')), None)
         if match is None:
             changes.append(_change('removed', before=record))
         else:
@@ -145,6 +147,7 @@ def _description(record):
         'shared_pending': 'dois nomes na origem; definição pendente',
         'allocated_to_you': 'atividade definida para você',
         'allocated_to_colleague': 'atividade definida para o colega',
+        'reconciliation_required': 'decisão preservada; alteração na fonte exige conferência',
     }
     status_label = allocation_labels.get(record['status'], '')
     suffix = f' ({status_label})' if status_label else ''
@@ -205,7 +208,7 @@ def notify_schedule_changes(source, before, after, *, previous_success):
             dedup_key=dedup_key,
             defaults={
                 'resident_id': resident_id, 'kind': 'schedule',
-                'title': 'Sua escala foi atualizada', 'message': _message(changes),
+                'title': 'Há uma divergência na sua escala' if any((item['after'] or {}).get('status') == 'reconciliation_required' for item in changes) else 'Sua escala foi atualizada', 'message': _message(changes),
                 'payload': payload, 'link': f'/?week={week.isoformat()}&scope=mine',
             },
         )

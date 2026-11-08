@@ -27,6 +27,7 @@ def dashboard(request,account_form=None):
     scope='all' if request.GET.get('scope')=='all' else 'mine'
     active=Shift.objects.filter(active=True).select_related('resident')
     future=active.filter(starts_at__gt=now)
+    exchangeable=future.filter(requires_reconciliation=False)
     from .calendar_data import next_activity_day,allocation_choices
     default_day=next_activity_day(person,now)
     if default_day is None:
@@ -114,8 +115,8 @@ def dashboard(request,account_form=None):
         'sector_rows':sector_rows(days),'layout':'sector' if request.GET.get('layout')=='sector' else 'day','account_form':account_form,'access_accounts':access_accounts,'direct_accounts':direct_accounts,'box':box,'sent_count':pending_exchanges.filter(proposer=person).count()+pending_allocations.filter(proposer=person).count(),'incoming_preview':pending_exchanges.filter(recipient=person)[:4],'tab':tab,'scope':scope,'resident_user':person,'linked':person.pk!=request.user.pk,'resident_choices':residents,'residents':residents,
         'days':days,'week_start':week_start,'week_last':week_next-timedelta(days=1),'week_previous':week_start-timedelta(days=7),'week_next':week_next,'today':today,'now':now,
         'own_week_count':own_week_count,'own_shared_count':own_shared_count,'pending_count':pending_count,'received_count':received_count,
-        'future_count':future.count(),'has_offered':future.filter(resident=person).exists(),'has_requested':future.exclude(resident=person).exists(),
-        'offered':future.filter(resident=person),'requested':future.exclude(resident=person),'bounds':bounds,
+        'future_count':future.count(),'has_offered':exchangeable.filter(resident=person).exists(),'has_requested':exchangeable.exclude(resident=person).exists(),
+        'offered':exchangeable.filter(resident=person),'requested':exchangeable.exclude(resident=person),'bounds':bounds,
         'exchanges':displayed_exchanges[:100],'recent_exchanges':exchanges[:4],'allocations':displayed_allocations[:100],'my_shared':my_shared,'allocation_options':allocation_options,'allocation_eligible_ids':allocation_eligible_ids,
         'latest_sync':SyncState.objects.filter(last_success__isnull=False).order_by('-last_success').first(),'source_cards':source_cards,'drive_folders':DriveFolder.objects.all() if request.user.is_superuser else [],'sync_health':sync_health_status,
     })
@@ -245,6 +246,10 @@ def register_source(request):
     if not request.user.is_superuser:
         return HttpResponseForbidden('Somente o administrador pode adicionar planilhas.')
     value=request.POST.get('url','').strip()
+    source_format=request.POST.get('format','weekly')
+    if source_format not in ['weekly','cinderelas']:
+        messages.error(request,'Selecione um formato de planilha válido.')
+        return redirect('/?tab=sources')
     parsed=urlparse(value)
     if parsed.scheme:
         match=re.fullmatch(r'/spreadsheets/d/([A-Za-z0-9_-]{20,100})(?:/.*)?',parsed.path)
@@ -253,7 +258,12 @@ def register_source(request):
     if not sheet_id:
         messages.error(request,'Cole um link válido de uma planilha Google Sheets.')
     else:
-        source,created=SheetSource.objects.get_or_create(spreadsheet_id=sheet_id,defaults={'name':request.POST.get('name','').strip()[:200]})
+        source,created=SheetSource.objects.get_or_create(spreadsheet_id=sheet_id,defaults={'name':request.POST.get('name','').strip()[:200],'format':source_format})
+        if source.format!=source_format:
+            if SyncState.objects.filter(source=sheet_id,last_success__isnull=False).exists():
+                messages.error(request,'Esta fonte já foi importada com outro formato. Revise o cadastro antes de alterar.')
+                return redirect('/?tab=sources')
+            source.format=source_format;source.save(update_fields=['format'])
         if not source.enabled:
             source.enabled=True;source.save(update_fields=['enabled'])
         messages.success(request,'Planilha cadastrada para a próxima leitura diária. Use Atualizar agora para antecipar.')
@@ -261,7 +271,7 @@ def register_source(request):
 
 
 def forum_exchange_context(person):
-    future=Shift.objects.filter(active=True,starts_at__gt=timezone.now()).select_related('resident')
+    future=Shift.objects.filter(active=True,starts_at__gt=timezone.now(),requires_reconciliation=False).select_related('resident')
     return {'resident_user':person,'tab':'forum','offered':future.filter(resident=person),'requested':future.exclude(resident=person),'future_count':future.count(),'has_offered':future.filter(resident=person).exists(),'has_requested':future.exclude(resident=person).exists()}
 
 @login_required

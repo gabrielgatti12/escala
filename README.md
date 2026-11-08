@@ -122,3 +122,17 @@ Para instalações existentes, altere o intervalo com `bash scripts/set-sync-int
 A gravação nas planilhas originais aguarda permissão de editor e credencial Google de escrita. A chave de API pública configurada serve à leitura; as decisões continuam preservadas no banco. A integração da cobertura do pós-plantão fica para uma etapa posterior.
 
 Validação desta versão: 179 testes passaram, incluindo assinatura privada, CSRF, avisos por residente, leitura diária e atualização manual. O navegador validou geração/revogação de assinatura, antes/depois e lembretes no celular com dados fictícios. A inclusão do link em uma conta Google é feita pelo próprio residente; o Google controla quando relê a assinatura. A implantação na Oracle e o ajuste do proxy estão descritos em `deploy/README.md`.
+
+## Cinderelas mensais
+
+Em Planilhas e fontes, selecione o formato **Cinderelas · 18h–24h** e cadastre uma única vez o link do arquivo que reúne os meses. O importador lê as abas com mês e ano no título, somente linhas com horário de 18h às 24h e residente definido; o encerramento é às 00h do dia seguinte, no fuso de São Paulo. Turnos noturnos 18–08, 08–08 e demais horários ficam fora desse formato. O grupo R1/R2/R3 vem da grade, e os nomes são associados aos perfis existentes sem criar contas nem escolher associações aproximadas.
+
+A grade mensal é a fonte atual dos nomes. Formulários, TROCAS, Legendas e modelos não são importados como plantões nem reaplicados como decisões. Pedidos antigos pendentes no Forms continuam naquele fluxo; novos pedidos podem ser feitos e confirmados pelo destinatário no aplicativo. A escrita nas planilhas continua aguardando permissão e credencial apropriadas.
+
+Cinderela troca apenas com cinderela: **R1 com R1; R2 e R3 entre si**. A confirmação revalida grupo, titularidade, datas futuras e conflitos com todos os demais compromissos. Os cartões e opções mostram o grupo. Plantões em conciliação ficam visíveis, mas não disponíveis para novas trocas até a conferência.
+
+A leitura diária e o botão Atualizar agora atendem também a essa fonte. Os links de origem abrem a aba/célula mensal correta. As identidades dos slots independem do nome do residente e da grafia do título da aba, mantendo o evento do calendário em releituras e renomeações. Meses com dados elegíveis inválidos ou nomes não associados preservam os registros anteriores com aviso, sem desfazer decisões. Abas duplicadas para o mesmo mês exigem conferência; nomes em fórmulas sem cache não são tratados como vagas. Datas inválidas fora dos turnos elegíveis são apenas sinalizadas.
+
+Trocas aceitas no app são preservadas enquanto a planilha mantém a atribuição antiga. Se a grade passar a refletir a mesma decisão, a leitura reconhece a atualização; se houver uma terceira alteração conflitante, preserva a decisão local e sinaliza a divergência ao residente. Uma aba ausente ou inválida não apaga silenciosamente os outros meses.
+
+Validação de Cinderelas (08/11/2026): 242 testes passaram. O arquivo analisado gerou 2.378 cinderelas em 12 meses, todos associados a residentes existentes, sem novas contas nem duplas pendentes. Releituras preservaram os IDs e não geraram duplicatas ou avisos indevidos; renomeação de abas, conflitos externos, meses preservados, vínculos e regras de troca foram verificados. O aviso em MAIO2026!Q63 não afeta os turnos elegíveis.

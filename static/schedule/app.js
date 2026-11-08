@@ -9,25 +9,64 @@
   const allocationDay = document.getElementById('allocation-day');
   const searches = [...document.querySelectorAll('[data-filter-select]')];
   const normalize = value => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
-  function filterShifts(input) {
-    const select = document.getElementById(input.dataset.filterSelect);
-    const words = normalize(input.value).trim().split(/\s+/).filter(Boolean);
-    let count = 0;
-    for (const option of select.options) {
-      if (!option.value) continue;
-      const text = normalize(option.textContent);
-      const matches = words.every(word => text.includes(word));
-      option.hidden = !matches;
-      option.disabled = !matches;
-      if (matches) count += 1;
-      else if (option.selected) select.value = '';
+  const shiftCategory = option => option.dataset.category || 'regular';
+  function shiftGroup(option) {
+    const group = (option.dataset.group || '').trim().toUpperCase();
+    return group === 'R1' ? 'R1' : ['R2', 'R3'].includes(group) ? 'R2R3' : '';
+  }
+  function validShift(option) {
+    return shiftCategory(option) === 'regular' || (shiftCategory(option) === 'cinderela' && !!shiftGroup(option));
+  }
+  function compatibleShifts(option, other) {
+    return validShift(option) && (!other || (shiftCategory(option) === shiftCategory(other) &&
+      (shiftCategory(option) !== 'cinderela' || shiftGroup(option) === shiftGroup(other))));
+  }
+  function selectedShift(select) {
+    const option = select?.selectedOptions[0];
+    return option?.value ? option : null;
+  }
+  function matchesSearch(option, words) {
+    const text = normalize(option.textContent);
+    return words.every(word => text.includes(word));
+  }
+  function filterExchangeShifts(changed) {
+    if (!offered || !requested) return;
+    const words = new Map([offered, requested].map(select => {
+      const input = searches.find(field => field.dataset.filterSelect === select.id);
+      return [select, normalize(input?.value || '').trim().split(/\s+/).filter(Boolean)];
+    }));
+    for (const select of [offered, requested]) {
+      const choice = selectedShift(select);
+      if (choice && (!validShift(choice) || !matchesSearch(choice, words.get(select)))) select.value = '';
     }
-    document.getElementById(select.id + '-count').textContent = count ? (count === 1 ? '1 plantão encontrado' : `${count} plantões encontrados`) : 'Nenhum plantão encontrado. Altere a busca.';
+    const offer = selectedShift(offered);
+    const request = selectedShift(requested);
+    if (offer && request && !compatibleShifts(offer, request)) {
+      if (changed === requested.id) offered.value = '';
+      else requested.value = '';
+    }
+    for (const [select, other] of [[offered, requested], [requested, offered]]) {
+      const anchor = selectedShift(other);
+      let count = 0;
+      for (const option of select.options) {
+        if (!option.value) continue;
+        const matches = compatibleShifts(option, anchor) && matchesSearch(option, words.get(select));
+        option.hidden = !matches;
+        option.disabled = !matches;
+        if (matches) count += 1;
+      }
+      const counter = document.getElementById(select.id + '-count');
+      if (counter) counter.textContent = count ? (count === 1 ? '1 plantão encontrado' : `${count} plantões encontrados`) : 'Nenhum plantão compatível encontrado. Altere a busca ou a seleção.';
+    }
+    const submit = document.getElementById('exchange-submit');
+    if (submit) submit.disabled = !offered.value || !requested.value;
   }
   searches.forEach(input => {
-    input.addEventListener('input', () => filterShifts(input));
-    filterShifts(input);
+    input.addEventListener('input', () => filterExchangeShifts(input.dataset.filterSelect));
   });
+  if (offered) offered.addEventListener('change', () => filterExchangeShifts(offered.id));
+  if (requested) requested.addEventListener('change', () => filterExchangeShifts(requested.id));
+  filterExchangeShifts();
   function updateAllocationSubmit() {
     if (mine && theirs) document.getElementById('allocation-submit').disabled = !mine.value || !theirs.value || theirs.disabled;
   }
@@ -61,9 +100,10 @@
   document.querySelectorAll('[data-open-exchange]').forEach(button => {
     button.addEventListener('click', () => {
       if (!exchange) return;
-      searches.forEach(input => { input.value = ''; filterShifts(input); });
+      searches.forEach(input => { input.value = ''; });
       offered.value = button.dataset.offered || '';
       requested.value = button.dataset.requested || '';
+      filterExchangeShifts(button.dataset.requested ? requested.id : offered.id);
       exchange.showModal();
     });
   });

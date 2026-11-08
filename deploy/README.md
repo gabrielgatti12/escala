@@ -108,3 +108,22 @@ include /opt/escala-app/deploy/nginx-private-calendars.conf;
 ```
 
 Ela preserva o proxy e os cabeçalhos de HTTPS, desabilitando logs apenas nas rotas que carregam tokens privados. Depois, valide com `nginx -t` e aplique com `systemctl reload nginx`. Mantenha links externos em HTTPS. Se quiser evitar o registro de acessos acidentais por HTTP, desabilite também o access log do bloco HTTP que apenas redireciona para HTTPS. Não publique logs antigos com links de ativação ou assinatura; gere outro link se ele tiver sido exposto.
+
+## Adicionar a planilha mensal de cinderelas
+
+Atualize o código, construa as imagens, pare o trabalhador durante a migração 0014 e recrie os serviços:
+
+```bash
+cd /opt/escala-app &&
+git pull --ff-only origin codex/escala-inicial &&
+bash scripts/oracle-compose.sh build &&
+bash scripts/oracle-compose.sh stop sync &&
+bash scripts/oracle-compose.sh run --rm web python manage.py migrate --noinput &&
+bash scripts/oracle-compose.sh up -d
+```
+
+Como administrador, abra Planilhas e fontes, escolha **Cinderelas · 18h–24h**, dê um nome e cole o link do arquivo. Clique Adicionar planilha e depois Atualizar agora. Uma única fonte importa todos os meses reconhecidos. Confira o resumo e os avisos do cartão; o ciclo diário passa a incluir essa fonte sem mudar o intervalo configurado.
+
+A alternativa pelo terminal, com o trabalhador periódico parado, é `bash scripts/oracle-compose.sh run --rm sync python manage.py sync_sheets ID_DA_PLANILHA --format cinderelas --only`. Reative-o com `bash scripts/oracle-compose.sh up -d` ao terminar, inclusive se houver falhas. Esse comando pode retornar sucesso com meses preservados por problemas de dados: consulte também os avisos da fonte e o resumo de meses importados/preservados. Nenhuma gravação é feita no Google.
+
+Não altere o formato de uma fonte semanal já importada para reutilizá-la: cadastre o arquivo correto separadamente. A migração mantém os registros antigos como formato semanal e categoria regular; não modifica suas identidades.

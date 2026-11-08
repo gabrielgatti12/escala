@@ -32,14 +32,36 @@ def resident_for(name):
         user.save(update_fields=['password'])
     return user
 
-def fetch_workbook(sheet_id):
+def load_export(data, *, inspect_formulas=False):
+    book=load_workbook(BytesIO(data),read_only=True,data_only=True)
+    if inspect_formulas:
+        formulas=load_workbook(BytesIO(data),read_only=True,data_only=False)
+        uncached={}
+        try:
+            for formula_sheet in formulas:
+                cached_sheet=book[formula_sheet.title]
+                missing=set()
+                for formula_row,cached_row in zip(formula_sheet.iter_rows(),cached_sheet.iter_rows()):
+                    for formula,cached in zip(formula_row,cached_row):
+                        if formula.data_type=='f' and cached.value is None:
+                            missing.add(formula.coordinate)
+                if missing:uncached[formula_sheet.title]=missing
+        except Exception:
+            book.close()
+            raise
+        finally:
+            formulas.close()
+        book._uncached_formula_cells=uncached
+    return book
+
+def fetch_workbook(sheet_id, *, inspect_formulas=False):
     if not re.fullmatch(r'[A-Za-z0-9_-]{20,100}',sheet_id):
         raise ValueError('Identificador do Google Sheets inválido.')
     with urlopen(f'https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx',timeout=45) as response:
         data=response.read(20*1024*1024+1)
     if len(data)>20*1024*1024:
         raise ValueError('Planilha excede o limite de 20 MB.')
-    return load_workbook(BytesIO(data),read_only=True,data_only=True)
+    return load_export(data,inspect_formulas=inspect_formulas)
 
 def parse_shift_hours(day,value):
     match=HOURS.fullmatch(str(value or ''))

@@ -4,6 +4,14 @@ from django.db.models import Q
 from django.utils import timezone
 from .models import Shift, Exchange
 
+def exchange_group(shift):
+    if shift.category!='cinderela':
+        return shift.category
+    group={'R1':'R1','R2':'R2/R3','R3':'R2/R3'}.get(shift.resident_group)
+    if group is None:
+        raise ValidationError('Ano do residente não definido para a cinderela. Confira a planilha de origem antes de solicitar uma troca.')
+    return group
+
 def validate_pair(offered, requested, proposer, recipient, now=None):
     if not offered.active or not requested.active:
         raise ValidationError('Um dos plantões foi removido da planilha.')
@@ -11,6 +19,12 @@ def validate_pair(offered, requested, proposer, recipient, now=None):
         raise ValidationError('Escolha um plantão de outro residente.')
     if offered.resident_id != proposer.pk or requested.resident_id != recipient.pk:
         raise ValidationError('A titularidade dos plantões mudou. Crie uma nova solicitação.')
+    if offered.requires_reconciliation or requested.requires_reconciliation:
+        raise ValidationError('Um dos plantões precisa de conciliação. Confira a planilha de origem e resolva a divergência antes de solicitar uma troca.')
+    if offered.category != requested.category:
+        raise ValidationError('Cinderelas só podem ser trocadas por outras cinderelas.')
+    if offered.category=='cinderela' and exchange_group(offered)!=exchange_group(requested):
+        raise ValidationError('Cinderelas de R1 só podem ser trocadas entre R1. R2 e R3 podem trocar entre si.')
     if min(offered.starts_at, requested.starts_at) <= (now or timezone.now()):
         raise ValidationError('Só é possível trocar plantões futuros.')
     for resident, incoming in [(proposer, requested), (recipient, offered)]:

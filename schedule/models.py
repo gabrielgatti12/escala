@@ -10,6 +10,11 @@ def is_rest_sector(value):
     return "pos plantao" in re.sub(r"[^a-z0-9]+"," ",value)
 
 class Shift(models.Model):
+    category = models.CharField(max_length=20, choices=[('regular','Atividade'),('cinderela','Cinderela')], default='regular')
+    resident_group = models.CharField(max_length=20, blank=True)
+    source_tab = models.CharField(max_length=100, default='Espelho Semanal')
+    source_snapshot = models.JSONField(default=dict)
+    requires_reconciliation = models.BooleanField(default=False)
     external_id = models.CharField(max_length=120, unique=True)
     wants_exchange = models.BooleanField(default=False)
     source = models.CharField(max_length=100,blank=True)
@@ -24,7 +29,7 @@ class Shift(models.Model):
         constraints = [models.CheckConstraint(condition=models.Q(ends_at__gt=models.F('starts_at')),name='positive_shift_duration')]
     @property
     def source_url(self):
-        return f"https://docs.google.com/spreadsheets/d/{self.source}/edit?range="+quote("'Espelho Semanal'!"+self.source_cell) if self.source and self.source_cell else ''
+        return f"https://docs.google.com/spreadsheets/d/{self.source}/edit?range="+quote("'"+self.source_tab.replace("'","''")+"'!"+self.source_cell) if self.source and self.source_cell else ''
     def __str__(self):
         return f'{self.resident.get_full_name() or self.resident.username} · {timezone.localtime(self.starts_at):%d/%m %H:%M} · {self.sector}'
 class Exchange(models.Model):
@@ -62,6 +67,7 @@ class SyncState(models.Model):
     summary = models.CharField(max_length=250,blank=True)
 
 class SharedActivity(models.Model):
+    source_tab = models.CharField(max_length=100, default='Espelho Semanal')
     source_cell = models.CharField(max_length=30,blank=True)
     active = models.BooleanField(default=True)
     allocated_to = models.ForeignKey(settings.AUTH_USER_MODEL,null=True,blank=True,on_delete=models.PROTECT,related_name='allocated_activities')
@@ -73,7 +79,7 @@ class SharedActivity(models.Model):
     sector = models.CharField(max_length=120)
     @property
     def source_url(self):
-        return f"https://docs.google.com/spreadsheets/d/{self.source}/edit?range="+quote("'Espelho Semanal'!"+self.source_cell) if self.source and self.source_cell else ''
+        return f"https://docs.google.com/spreadsheets/d/{self.source}/edit?range="+quote("'"+self.source_tab.replace("'","''")+"'!"+self.source_cell) if self.source and self.source_cell else ''
     def __str__(self):
         return f'{timezone.localtime(self.starts_at):%d/%m %H:%M} · {self.sector}'
     class Meta:
@@ -98,6 +104,7 @@ class ResidentAccess(models.Model):
         return f'{self.account} → {self.resident.get_full_name() or self.resident.username}'
 
 class IncompleteActivity(models.Model):
+    source_tab = models.CharField(max_length=100, default='Espelho Semanal')
     @property
     def is_rest(self): return is_rest_sector(self.sector)
     external_id = models.CharField(max_length=120,unique=True)
@@ -111,7 +118,7 @@ class IncompleteActivity(models.Model):
         ordering=['date','sector']
     @property
     def source_url(self):
-        return f"https://docs.google.com/spreadsheets/d/{self.source}/edit?range="+quote("'Espelho Semanal'!"+self.source_cell)
+        return f"https://docs.google.com/spreadsheets/d/{self.source}/edit?range="+quote("'"+self.source_tab.replace("'","''")+"'!"+self.source_cell)
 
 class DriveFolder(models.Model):
     folder_id = models.CharField(max_length=100,unique=True)
@@ -122,6 +129,8 @@ class DriveFolder(models.Model):
     def __str__(self): return self.name or self.folder_id
 
 class SheetSource(models.Model):
+    format = models.CharField(max_length=20, choices=[('weekly','Escala semanal'),('cinderelas','Cinderelas 18–24')], default='weekly')
+    warnings = models.TextField(blank=True)
     spreadsheet_id = models.CharField(max_length=100,unique=True)
     name = models.CharField(max_length=200,blank=True)
     folder = models.ForeignKey(DriveFolder,null=True,blank=True,on_delete=models.SET_NULL)

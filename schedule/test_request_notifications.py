@@ -14,6 +14,10 @@ from .services import propose_allocation, propose_exchange, respond_allocation, 
 
 class RequestNotificationTests(TestCase):
     def setUp(self):
+        # These fixtures intentionally exercise an empty, controlled registry.
+        from .models import SheetSource, SyncHeartbeat
+        SheetSource.objects.all().delete()
+        SyncHeartbeat.objects.all().delete()
         self.a = get_user_model().objects.create_user('notice-ana', first_name='Ana')
         self.b = get_user_model().objects.create_user('notice-bia', first_name='Bia')
         self.c = get_user_model().objects.create_user('notice-carla', first_name='Carla')

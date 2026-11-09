@@ -140,6 +140,7 @@ class CinderelasImportTests(TestCase):
         book,sheet,col=self.book();sync_cinderelas(book,self.source)
         initial=set(Shift.objects.filter(source=self.source).values_list('pk',flat=True))
         sheet.title='JANEIRO 2035';sync_cinderelas(book,self.source)
+        sheet.title='JANEIRO|2035';sync_cinderelas(book,self.source)
         self.assertEqual(set(Shift.objects.filter(source=self.source,active=True).values_list('pk',flat=True)),initial)
         self.assertFalse(Shift.objects.filter(source=self.source,requires_reconciliation=True).exists())
         sheet.cell(5,col+1).value=None;sync_cinderelas(book,self.source)

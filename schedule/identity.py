@@ -1,5 +1,14 @@
 from .models import ResidentAccess
 
+def is_account_enabled(account):
+    """Require an active login and resident, and keep source identities read-only."""
+    if not account.is_active:
+        return False
+    resident_active = ResidentAccess.objects.filter(account=account).values_list('resident__is_active', flat=True).first()
+    if resident_active is False:
+        return False
+    return not ResidentAccess.objects.filter(resident=account).exclude(account=account).exists()
+
 def resident_for_account(account):
     if not hasattr(account, '_schedule_resident'):
         mapping = ResidentAccess.objects.select_related('resident').filter(account=account).first()

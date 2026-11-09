@@ -10,8 +10,12 @@ from .sheets import SheetFormatError, digest
 
 
 def source_values(slot, resident):
+    category=slot.get('category','cinderela')
+    label={'cinderela':'Cinderela','night':'Plantão noturno','weekend':'Plantão diurno'}[category]
+    if (slot['ends_at']-slot['starts_at']).total_seconds()==86400:
+        label='Plantão 24h'
     return {'resident_id': resident.pk, 'starts_at': slot['starts_at'].isoformat(),
-            'ends_at': slot['ends_at'].isoformat(), 'sector': f"Cinderela · {slot['group']}",
+            'ends_at': slot['ends_at'].isoformat(), 'sector': f"{label} · {slot['group']}",
             'resident_group': slot['group']}
 
 
@@ -23,8 +27,22 @@ def current_values(shift):
 
 @transaction.atomic
 def sync_cinderelas(book, source_id):
+    return sync_monthly_roster(book,source_id,full=False)
+
+
+@transaction.atomic
+def sync_plantoes(book,source_id):
+    return sync_monthly_roster(book,source_id,full=True)
+
+
+def sync_monthly_roster(book,source_id,*,full):
     from .cinderelas_parser import parse_cinderelas, month_key
-    parsed = parse_cinderelas(book)
+    if full:
+        from .plantao_parser import parse_plantoes
+        parsed=parse_plantoes(book)
+    else:
+        parsed = parse_cinderelas(book)
+    categories=['cinderela','night','weekend'] if full else ['cinderela']
     state, _ = SyncState.objects.get_or_create(source=source_id)
     state = SyncState.objects.select_for_update().get(pk=state.pk)
     previous_success = state.last_success
@@ -38,7 +56,7 @@ def sync_cinderelas(book, source_id):
             preserved_tabs.add(slot['tab'])
             warnings.append(f"{slot['tab']}: mês preservado por nome não associado em {slot['cell']}.")
     valid_tabs = set(parsed['recognized_tabs']) - preserved_tabs
-    old_tabs = set(Shift.objects.filter(source=source_id, category='cinderela', active=True).values_list('source_tab', flat=True))
+    old_tabs = set(Shift.objects.filter(source=source_id, category__in=categories, active=True).values_list('source_tab', flat=True))
     if not valid_tabs and not old_tabs:
         raise SheetFormatError('Nenhum mês pôde ser importado com segurança. ' + ' '.join(warnings[:2]))
     recognized_months = {month_key(tab) for tab in parsed['recognized_tabs']}
@@ -61,14 +79,18 @@ def sync_cinderelas(book, source_id):
             continue
         resident = matches[slot['name']]
         # A renamed tab must update the same logical slot/calendar UID.
-        suffix = slot['slot_key'].split('|', 1)[1]
-        external_id = 'cinderela:' + digest(source_id + '|' + suffix)
+        ordinal = slot['slot_key'].rsplit('|', 1)[1]
+        category=slot.get('category','cinderela')
+        hours=slot.get('normalized_hours','18-24')
+        suffix = f"{slot['date'].isoformat()}|{slot['group']}|{hours}|{ordinal}"
+        prefix='cinderela:' if category=='cinderela' else 'plantao:'
+        external_id = prefix + digest(source_id + '|' + suffix)
         seen.append(external_id)
         desired = source_values(slot, resident)
         shift = Shift.objects.select_for_update().filter(external_id=external_id).first()
         if shift is None:
             legacy_tabs = {slot['tab']} | {tab for tab in old_tabs if month_key(tab) == month_key(slot['tab'])}
-            legacy_ids = ['cinderela:' + digest(source_id + '|' + tab + '|' + suffix) for tab in legacy_tabs]
+            legacy_ids = [prefix + digest(source_id + '|' + tab + '|' + suffix) for tab in legacy_tabs]
             legacy = list(Shift.objects.select_for_update().filter(source=source_id, external_id__in=legacy_ids))
             if len(legacy) > 1:
                 raise SheetFormatError('Há posições duplicadas para o mesmo mês; confira a fonte antes de importar.')
@@ -99,7 +121,7 @@ def sync_cinderelas(book, source_id):
                 ExchangeTopic.objects.filter(shift=shift, closed_at__isnull=True).update(closed_at=now)
         fields = dict(resident=resident, starts_at=slot['starts_at'], ends_at=slot['ends_at'], sector=desired['sector'],
                       source=source_id, source_tab=slot['tab'], source_cell=slot['cell'],
-                      category='cinderela', resident_group=slot['group'], active=True,
+                      category=category, resident_group=slot['group'], active=True,
                       source_snapshot=desired, requires_reconciliation=False)
         if shift:
             for field, value in fields.items():
@@ -107,7 +129,7 @@ def sync_cinderelas(book, source_id):
             shift.save()
         else:
             Shift.objects.create(external_id=external_id, **fields)
-    obsolete = Shift.objects.filter(source=source_id, category='cinderela', source_tab__in=cleanup_tabs, active=True).exclude(external_id__in=seen)
+    obsolete = Shift.objects.filter(source=source_id, category__in=categories, source_tab__in=cleanup_tabs, active=True).exclude(external_id__in=seen)
     obsolete_protected = obsolete.filter(pk__in=accepted_ids)
     affected.update(obsolete.values_list('pk', flat=True))
     protected += obsolete_protected.count()
@@ -116,7 +138,7 @@ def sync_cinderelas(book, source_id):
     ExchangeTopic.objects.filter(shift__in=removed, closed_at__isnull=True).update(closed_at=now)
     removed.update(active=False, wants_exchange=False)
     if held_tabs:
-        held = Shift.objects.filter(source=source_id, category='cinderela', source_tab__in=held_tabs, active=True)
+        held = Shift.objects.filter(source=source_id, category__in=categories, source_tab__in=held_tabs, active=True)
         affected.update(held.values_list('pk', flat=True))
         held.update(requires_reconciliation=True)
     if affected:
@@ -124,7 +146,8 @@ def sync_cinderelas(book, source_id):
     reconciliation = Shift.objects.filter(source=source_id, active=True, requires_reconciliation=True).count()
     if valid_tabs:
         state.last_success = now
-    state.summary = f'{len(seen)} cinderelas definidos; {len(valid_tabs)} meses importados; {len(preserved_tabs)} meses preservados; {protected} trocas preservadas; {reconciliation} exigem conciliação.'
+    label='plantões' if full else 'cinderelas'
+    state.summary = f'{len(seen)} {label} definidos; {len(valid_tabs)} meses importados; {len(preserved_tabs)} meses preservados; {protected} trocas preservadas; {reconciliation} exigem conciliação.'
     state.save()
     SheetSource.objects.filter(spreadsheet_id=source_id).update(warnings='\n'.join(dict.fromkeys(warnings))[:12000])
     if previous_success:

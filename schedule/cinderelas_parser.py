@@ -73,6 +73,12 @@ def _day(value):
     return None
 
 
+def _cinderela_range(value):
+    if not _eligible_hours(value):
+        return None
+    return {'start': time(18), 'end': time(), 'day_offset': 1, 'normalized_hours': '18-24'}
+
+
 def parse_cinderelas(book):
     """Return validated monthly slots and the tabs whose prior data must remain.
 
@@ -80,6 +86,11 @@ def parse_cinderelas(book):
     supplied by the XLSX loader. A formula-only name cell cannot be mistaken for
     an intentional vacancy when that metadata is available.
     """
+    return _parse_monthly(book, hours_parser=_cinderela_range, label='Cinderelas', rows_label='linhas 18–24')
+
+
+def _parse_monthly(book, *, hours_parser, label, rows_label, strict_hours=False):
+    """Shared grid validation; the public Cinderelas parser retains its filter."""
     result = {'slots': [], 'warnings': [], 'preserved_tabs': set(), 'recognized_tabs': set()}
     uncached = getattr(book, '_uncached_formula_cells', {})
     monthly_sheets = []
@@ -138,11 +149,15 @@ def parse_cinderelas(book):
                         errors = True
                         result['warnings'].append(f'{tab}: horário por fórmula sem valor confirmado em {hour_cell}; aba preservada.')
                         continue
-                    if not _eligible_hours(raw_hours):
+                    hours = hours_parser(raw_hours)
+                    if hours is None:
+                        if strict_hours and name and _normalized(name) not in ('COBUNEX', 'X'):
+                            errors = True
+                            result['warnings'].append(f'{tab}: horário inválido ou ausente em {hour_cell}; aba preservada.')
                         continue
                     eligible_rows += 1
                     day = days[column]
-                    ordinal_key = (day, group) if day else (header_row, column, group)
+                    ordinal_key = (day, group, hours['normalized_hours']) if day else (header_row, column, group, hours['normalized_hours'])
                     ordinals[ordinal_key] += 1
                     cell = f'{get_column_letter(column + 1)}{row}'
                     if cell in tab_uncached or (isinstance(name, str) and name.startswith('=')):
@@ -152,8 +167,8 @@ def parse_cinderelas(book):
                     if name is None or (isinstance(name, str) and not name.strip()):
                         continue
                     if _normalized(name) in ('COBUNEX', 'X'):
-                        label = 'COB UNEX' if _normalized(name) == 'COBUNEX' else 'x'
-                        result['warnings'].append(f'{tab}: marcador {label} em {cell} ignorado; não é residente.')
+                        marker_label = 'COB UNEX' if _normalized(name) == 'COBUNEX' else 'x'
+                        result['warnings'].append(f'{tab}: marcador {marker_label} em {cell} ignorado; não é residente.')
                         continue
                     if not isinstance(name, str) or name.startswith('#'):
                         errors = True
@@ -161,27 +176,30 @@ def parse_cinderelas(book):
                         continue
                     if day is None or (day.year, day.month) != month:
                         errors = True
-                        result['warnings'].append(f'{tab}: atividade 18–24 em {cell} depende de data inválida ou fora do mês; aba preservada.')
+                        result['warnings'].append(f"{tab}: atividade {hours['normalized_hours'].replace('-', '–')} em {cell} depende de data inválida ou fora do mês; aba preservada.")
                         continue
                     if group is None:
                         errors = True
                         result['warnings'].append(f'{tab}: grupo R1/R2/R3 ausente em {cell}; aba preservada.')
                         continue
-                    slots.append({
+                    slot = {
                         'tab': tab, 'cell': cell, 'date': day,
-                        'starts_at': datetime.combine(day, time(18), SAO_PAULO),
-                        'ends_at': datetime.combine(day + timedelta(days=1), time(), SAO_PAULO),
+                        'starts_at': datetime.combine(day, hours['start'], SAO_PAULO),
+                        'ends_at': datetime.combine(day + timedelta(days=hours['day_offset']), hours['end'], SAO_PAULO),
                         'group': group, 'name': name.strip(),
-                        'slot_key': f'{tab}|{day.isoformat()}|{group}|18-24|{ordinals[ordinal_key]}',
-                    })
+                        'slot_key': f"{tab}|{day.isoformat()}|{group}|{hours['normalized_hours']}|{ordinals[ordinal_key]}",
+                    }
+                    if 'category' in hours:
+                        slot.update(category=hours['category'], normalized_hours=hours['normalized_hours'])
+                    slots.append(slot)
         if errors or not slots:
             result['preserved_tabs'].add(tab)
             if not errors:
-                detail = 'sem linhas 18–24' if not eligible_rows else 'sem residentes em linhas 18–24'
+                detail = f'sem {rows_label}' if not eligible_rows else f'sem residentes em {rows_label}'
                 result['warnings'].append(f'{tab}: mês {detail}; dados anteriores preservados.')
         else:
             result['slots'].extend(slots)
     if not result['recognized_tabs']:
         from .sheets import SheetFormatError
-        raise SheetFormatError('Nenhuma aba mensal reconhecida em Cinderelas; informe mês e ano no nome das abas.')
+        raise SheetFormatError(f'Nenhuma aba mensal reconhecida em {label}; informe mês e ano no nome das abas.')
     return result

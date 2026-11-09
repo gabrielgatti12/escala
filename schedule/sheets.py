@@ -32,19 +32,33 @@ def resident_for(name):
         user.save(update_fields=['password'])
     return user
 
-def load_export(data, *, inspect_formulas=False):
+def load_export(data, *, inspect_formulas=True):
+    from .xlsx_safety import inspect_xlsx,validate_loaded_workbook,UnsafeWorkbookError
+    try:
+        extents=inspect_xlsx(data)
+    except UnsafeWorkbookError as error:
+        raise SheetFormatError(str(error)) from error
     book=load_workbook(BytesIO(data),read_only=True,data_only=True)
+    try:
+        validate_loaded_workbook(book,data,extents)
+    except UnsafeWorkbookError as error:
+        book.close()
+        raise SheetFormatError(str(error)) from error
     if inspect_formulas:
         formulas=load_workbook(BytesIO(data),read_only=True,data_only=False)
         uncached={}
         try:
             for formula_sheet in formulas:
                 cached_sheet=book[formula_sheet.title]
+                budget=extents.get(getattr(formula_sheet,'_worksheet_path',None))
+                empty_strings=budget.empty_formula_strings if budget else frozenset()
                 missing=set()
                 for formula_row,cached_row in zip(formula_sheet.iter_rows(),cached_sheet.iter_rows()):
                     for formula,cached in zip(formula_row,cached_row):
                         if formula.data_type=='f' and cached.value is None:
-                            missing.add(formula.coordinate)
+                            confirmed_empty=(cached.data_type=='str' and
+                                             (formula.row,formula.column) in empty_strings)
+                            if not confirmed_empty:missing.add(formula.coordinate)
                 if missing:uncached[formula_sheet.title]=missing
         except Exception:
             book.close()
@@ -54,7 +68,7 @@ def load_export(data, *, inspect_formulas=False):
         book._uncached_formula_cells=uncached
     return book
 
-def fetch_workbook(sheet_id, *, inspect_formulas=False):
+def fetch_workbook(sheet_id, *, inspect_formulas=True):
     if not re.fullmatch(r'[A-Za-z0-9_-]{20,100}',sheet_id):
         raise ValueError('Identificador do Google Sheets inválido.')
     with urlopen(f'https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx',timeout=45) as response:
@@ -73,6 +87,40 @@ def parse_shift_hours(day,value):
     if end<=start: end+=timedelta(days=1)
     return start,end
 
+def validate_weekly_input(book,rows,days):
+    """Reject incomplete cached data before treating missing cells as removals."""
+    columns={column for column,day in days}
+    weekdays={'segunda','terca','quarta','quinta','sexta','sabado','domingo'}
+    if len(rows)>1:
+        columns.update(index for index,value in enumerate(rows[1])
+                       if isinstance(value,str) and slugify(value).split('-')[0] in weekdays)
+    # Weekly blocks have seven columns. Keep the existing dynamic date offsets,
+    # and inspect missing blocks only when known days agree on that geometry.
+    remainders={column%7 for column,day in days}
+    if len(remainders)==1:
+        width=max((len(row) for row in rows),default=0)
+        columns.update(range(next(iter(remainders)),width,7))
+    missing=getattr(book,'_uncached_formula_cells',{}).get('Espelho Semanal',set())
+    for column in sorted(columns):
+        def value(row,offset):return row[column+offset] if len(row)>column+offset else None
+        names_present=any(isinstance(value(row,offset),str) and value(row,offset).strip()
+                          for row in rows[2:] for offset in [4,5])
+        day_value=rows[0][column] if len(rows[0])>column else None
+        if names_present and not isinstance(day_value,datetime):
+            cell=f'{get_column_letter(column+1)}1'
+            raise SheetFormatError(f'Data ausente ou inválida em {cell} para um dia com residentes; dados anteriores preservados.')
+        for row_number,row in enumerate(rows[2:],3):
+            raw_hours=value(row,1)
+            has_names=any(isinstance(value(row,offset),str) and value(row,offset).strip() for offset in [4,5])
+            hour_cell=f'{get_column_letter(column+2)}{row_number}'
+            if has_names and (hour_cell in missing or (isinstance(raw_hours,str) and raw_hours.startswith('='))):
+                raise SheetFormatError(f'Fórmula sem horário confirmado em {hour_cell}; dados anteriores preservados.')
+            for offset in [4,5]:
+                name=value(row,offset)
+                name_cell=f'{get_column_letter(column+offset+1)}{row_number}'
+                if (HOURS.fullmatch(str(raw_hours or '')) or has_names) and (name_cell in missing or (isinstance(name,str) and name.startswith('='))):
+                    raise SheetFormatError(f'Fórmula sem nome confirmado em {name_cell}; dados anteriores preservados.')
+
 @transaction.atomic
 def sync_workbook(book, source):
     state,_=SyncState.objects.get_or_create(source=source)
@@ -89,6 +137,7 @@ def sync_workbook(book, source):
     days=[(i,v.date()) for i,v in enumerate(rows[0]) if isinstance(v,datetime)]
     if not days:
         raise SheetFormatError('Datas não reconhecidas; nada foi alterado.')
+    validate_weekly_input(book,rows,days)
     seen=[]; shared_seen=[]; incomplete_seen=[]; rest_count=0; occurrences={}; preserved=0
     for col,day in days:
         sector=''; location=''

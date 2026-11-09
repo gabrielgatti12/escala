@@ -15,11 +15,11 @@
     return group === 'R1' ? 'R1' : ['R2', 'R3'].includes(group) ? 'R2R3' : '';
   }
   function validShift(option) {
-    return shiftCategory(option) === 'regular' || (shiftCategory(option) === 'cinderela' && !!shiftGroup(option));
+    return shiftCategory(option) === 'regular' || (['cinderela', 'night', 'weekend'].includes(shiftCategory(option)) && !!shiftGroup(option));
   }
   function compatibleShifts(option, other) {
     return validShift(option) && (!other || (shiftCategory(option) === shiftCategory(other) &&
-      (shiftCategory(option) !== 'cinderela' || shiftGroup(option) === shiftGroup(other))));
+      (shiftCategory(option) === 'regular' || shiftGroup(option) === shiftGroup(other))));
   }
   function selectedShift(select) {
     const option = select?.selectedOptions[0];

@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.backends import ModelBackend
 from django.core.exceptions import PermissionDenied
+from .identity import is_account_enabled
 
 class EmailOrUsernameBackend(ModelBackend):
     def authenticate(self,request,username=None,password=None,**kwargs):
@@ -15,5 +16,13 @@ class EmailOrUsernameBackend(ModelBackend):
             if '@' in identity:raise PermissionDenied
             return None
         user=candidates[0]
-        if user.check_password(password) and self.user_can_authenticate(user):return user
+        if user.check_password(password):
+            if is_account_enabled(user):return user
+            # Stop Django's legacy backend from accepting an enabled alias
+            # whose resident is disabled, or a source with a separate login.
+            raise PermissionDenied
         if '@' in identity:raise PermissionDenied
+
+    def get_user(self,user_id):
+        user=super().get_user(user_id)
+        return user if user and is_account_enabled(user) else None

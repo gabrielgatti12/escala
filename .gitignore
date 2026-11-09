@@ -2,7 +2,9 @@
 __pycache__/
 *.pyc
 *.sqlite3
+*.sqlite3-*
 .env
+.env.tmp-*
 staticfiles/
 deploy/.env
 deploy/google-service-account.json

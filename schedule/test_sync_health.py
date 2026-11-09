@@ -10,6 +10,10 @@ from .monitoring import begin_cycle, finish_cycle, record_source_result, request
 
 class SyncHealthTests(TestCase):
     def setUp(self):
+        # These fixtures intentionally exercise an empty, controlled registry.
+        from .models import SheetSource, SyncHeartbeat
+        SheetSource.objects.all().delete()
+        SyncHeartbeat.objects.all().delete()
         self.now = timezone.now().replace(microsecond=0)
 
     def source(self, key, success=None, error='', enabled=True):

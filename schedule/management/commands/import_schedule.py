@@ -7,8 +7,10 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
-from openpyxl import load_workbook
 from schedule.models import Shift, Exchange
+from schedule.identity import resident_for_account
+from schedule.sheets import load_export
+from schedule.xlsx_safety import MAX_EXPORT_BYTES
 
 class Command(BaseCommand):
     help = 'Importa CSV UTF-8 ou XLSX local. --interval SEGUNDOS repete a leitura.'
@@ -33,7 +35,8 @@ class Command(BaseCommand):
             with path.open(encoding='utf-8-sig', newline='') as stream:
                 rows = list(csv.DictReader(stream))
         elif path.suffix.lower() == '.xlsx':
-            book = load_workbook(path, read_only=True, data_only=True)
+            with path.open('rb') as stream:
+                book = load_export(stream.read(MAX_EXPORT_BYTES+1))
             try:
                 values = iter(book.active.values)
                 headers = next(values)
@@ -52,9 +55,12 @@ class Command(BaseCommand):
                 raise ValueError(f'Linha {number}: id duplicado.')
             seen.add(external_id)
             try:
-                resident = get_user_model().objects.get(username=str(row['residente']).strip(),is_active=True)
+                account = get_user_model().objects.get(username=str(row['residente']).strip(),is_active=True)
             except get_user_model().DoesNotExist:
                 raise ValueError(f'Linha {number}: residente sem conta ativa.')
+            resident = resident_for_account(account)
+            if not resident.is_active:
+                raise ValueError(f'Linha {number}: residente vinculado está desativado.')
             dates = []
             for key in ['inicio','fim']:
                 value = row[key]
@@ -64,6 +70,8 @@ class Command(BaseCommand):
                 raise ValueError(f'Linha {number}: fim deve ser posterior ao início.')
             existing = Shift.objects.select_for_update().filter(external_id=external_id).first()
             if existing:
+                if existing.source:
+                    raise ValueError(f'Linha {number}: o identificador pertence a uma fonte sincronizada; altere o registro na fonte de origem.')
                 exchanged = Exchange.objects.filter(status='accepted').filter(Q(offered=existing)|Q(requested=existing)).exists()
                 if exchanged:
                     # Never silently undo an accepted exchange from stale spreadsheet data.

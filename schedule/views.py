@@ -247,7 +247,7 @@ def register_source(request):
         return HttpResponseForbidden('Somente o administrador pode adicionar planilhas.')
     value=request.POST.get('url','').strip()
     source_format=request.POST.get('format','weekly')
-    if source_format not in ['weekly','cinderelas']:
+    if source_format not in ['weekly','cinderelas','plantoes']:
         messages.error(request,'Selecione um formato de planilha válido.')
         return redirect('/?tab=sources')
     parsed=urlparse(value)
@@ -399,13 +399,17 @@ def account_activation_link(request,pk):
     from django.urls import reverse
     if not request.user.is_superuser:return HttpResponseForbidden('Somente o administrador pode gerar links de primeiro acesso.')
     account=get_object_or_404(get_user_model(),pk=pk,is_active=True)
+    from .identity import is_account_enabled
+    if not is_account_enabled(account):
+        messages.error(request,'Esta identidade não está habilitada para acesso individual. Confira o vínculo do residente.')
+        return redirect('/?tab=accounts')
     if account.has_usable_password():
         messages.error(request,'Esta conta já tem senha. O login por e-mail mantém a senha existente.')
         return redirect('/?tab=accounts')
     link=request.build_absolute_uri(reverse('activate_account',kwargs={'uidb64':urlsafe_base64_encode(force_bytes(account.pk)),'token':default_token_generator.make_token(account)}))
     response=render(request,'activation_link.html',{'tab':'accounts','activation_url':link,'activation_account':account})
     response['Cache-Control']='private, no-store'
-    response['Referrer-Policy']='no-referrer'
+    response['Referrer-Policy']='same-origin'
     return response
 
 from django.contrib.auth.views import PasswordResetConfirmView
@@ -413,4 +417,5 @@ class ActivateResidentAccount(PasswordResetConfirmView):
     template_name='registration/activate_account.html'
     def get_user(self,uidb64):
         user=super().get_user(uidb64)
-        return user if user and user.is_active and not user.has_usable_password() else None
+        from .identity import is_account_enabled
+        return user if user and is_account_enabled(user) and not user.has_usable_password() else None

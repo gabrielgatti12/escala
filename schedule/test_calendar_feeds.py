@@ -57,7 +57,8 @@ class CalendarSubscriptionTests(TestCase):
         self.assertNotEqual(subscription.token_digest, token)
         page = self.client.get(reverse('calendar_connections'))
         self.assertContains(page, reverse('calendar_feed', args=[token]))
-        self.assertEqual(page['Cache-Control'], 'private, no-store')
+        self.assertIn('private', page['Cache-Control'])
+        self.assertIn('no-store', page['Cache-Control'])
         self.assertEqual(page['Referrer-Policy'], 'same-origin')
         fresh_session = Client()
         fresh_session.force_login(self.account)
@@ -177,7 +178,10 @@ class CalendarSubscriptionTests(TestCase):
         self.resident.is_active = False
         self.resident.save(update_fields=['is_active'])
         self.assertEqual(Client().get(url).status_code, 404)
-        self.assertEqual(self.client.post(reverse('calendar_feed_create')).status_code, 403)
+        self.assertRedirects(
+            self.client.post(reverse('calendar_feed_create')),
+            '/accounts/login/?next=/calendario/conectar/gerar/',
+        )
 
     def test_admin_without_resident_link_gets_explanation_and_cannot_generate(self):
         admin = get_user_model().objects.create_superuser('calendar-admin', password='Admin-calendar-password-932!')

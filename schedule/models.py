@@ -10,7 +10,7 @@ def is_rest_sector(value):
     return "pos plantao" in re.sub(r"[^a-z0-9]+"," ",value)
 
 class Shift(models.Model):
-    category = models.CharField(max_length=20, choices=[('regular','Atividade'),('cinderela','Cinderela')], default='regular')
+    category = models.CharField(max_length=20, choices=[('regular','Atividade'),('cinderela','Cinderela'),('night','Noturno / 24h'),('weekend','Diurno / fim de semana')], default='regular')
     resident_group = models.CharField(max_length=20, blank=True)
     source_tab = models.CharField(max_length=100, default='Espelho Semanal')
     source_snapshot = models.JSONField(default=dict)
@@ -129,7 +129,7 @@ class DriveFolder(models.Model):
     def __str__(self): return self.name or self.folder_id
 
 class SheetSource(models.Model):
-    format = models.CharField(max_length=20, choices=[('weekly','Escala semanal'),('cinderelas','Cinderelas 18–24')], default='weekly')
+    format = models.CharField(max_length=20, choices=[('weekly','Escala semanal'),('cinderelas','Cinderelas 18–24'),('plantoes','Plantões completos')], default='weekly')
     warnings = models.TextField(blank=True)
     spreadsheet_id = models.CharField(max_length=100,unique=True)
     name = models.CharField(max_length=200,blank=True)
@@ -206,3 +206,13 @@ class SyncHeartbeat(models.Model):
     failed_sources = models.PositiveIntegerField(default=0)
     discovery_failed = models.BooleanField(default=False)
     refresh_requested_at = models.DateTimeField(null=True, blank=True)
+
+
+class LoginAttempt(models.Model):
+    # Keyed HMACs only: no login names, passwords, or IP addresses are stored.
+    key = models.CharField(max_length=64, primary_key=True)
+    window_started = models.DateTimeField()
+    failures = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        indexes = [models.Index(fields=['window_started'], name='login_attempt_expiry')]

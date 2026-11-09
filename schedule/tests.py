@@ -11,6 +11,10 @@ from .services import propose_exchange, respond_exchange
 
 class WorkflowTests(TestCase):
     def setUp(self):
+        # These fixtures intentionally exercise an empty, controlled registry.
+        from .models import SheetSource, SyncHeartbeat
+        SheetSource.objects.all().delete()
+        SyncHeartbeat.objects.all().delete()
         self.a = get_user_model().objects.create_user('ana')
         self.b = get_user_model().objects.create_user('bia')
         self.c = get_user_model().objects.create_user('carla')

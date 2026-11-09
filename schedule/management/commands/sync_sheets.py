@@ -16,7 +16,7 @@ class Command(BaseCommand):
         parser.add_argument('--interval',type=int,default=0)
         parser.add_argument('--registered',action='store_true')
         parser.add_argument('--only',action='store_true',help='Importa somente os IDs informados, sem descoberta de pastas.')
-        parser.add_argument('--format',choices=['weekly','cinderelas'],help='Formato para cadastrar os IDs informados.')
+        parser.add_argument('--format',choices=['weekly','cinderelas','plantoes'],help='Formato para cadastrar os IDs informados.')
     def handle(self,sheet_ids,interval,registered,only,**options):
         if only and not sheet_ids: raise CommandError('--only exige IDs de planilhas.')
         if interval and interval<30: raise CommandError('Intervalo mínimo: 30 segundos.')
@@ -57,7 +57,8 @@ class Command(BaseCommand):
                         folders.update(error=f'Acesso Drive indisponível ({type(error).__name__}). Configure a chave de API para a pasta pública ou a credencial de leitura na instância.')
                         self.stderr.write('Pastas do Drive ainda não acessíveis; continuando com as fontes conhecidas.')
                 failures=0
-                sources=SheetSource.objects.filter(enabled=True)
+                from django.db.models import Case, When
+                sources=SheetSource.objects.filter(enabled=True).order_by(Case(When(format='weekly',then=0),default=1),'pk')
                 if only: sources=sources.filter(spreadsheet_id__in=sheet_ids)
                 total_sources=sources.count()
                 set_cycle_sources(total_sources)
@@ -71,18 +72,18 @@ class Command(BaseCommand):
                                 from schedule.drive import authenticated_session
                                 session=authenticated_session()
                             if getattr(session,'public_drive',False):
-                                book=fetch_workbook(source.spreadsheet_id,inspect_formulas=True) if source.format=='cinderelas' else fetch_workbook(source.spreadsheet_id)
+                                book=fetch_workbook(source.spreadsheet_id,inspect_formulas=True) if source.format in ['cinderelas','plantoes'] else fetch_workbook(source.spreadsheet_id)
                             else:
                                 from schedule.drive import fetch_private_workbook
-                                book=fetch_private_workbook(session,source.spreadsheet_id,inspect_formulas=True) if source.format=='cinderelas' else fetch_private_workbook(session,source.spreadsheet_id)
+                                book=fetch_private_workbook(session,source.spreadsheet_id,inspect_formulas=True) if source.format in ['cinderelas','plantoes'] else fetch_private_workbook(session,source.spreadsheet_id)
                         else:
-                            book=fetch_workbook(source.spreadsheet_id,inspect_formulas=True) if source.format=='cinderelas' else fetch_workbook(source.spreadsheet_id)
-                        if source.format=='cinderelas':
-                            from schedule.cinderelas_import import sync_cinderelas
-                            summary=sync_cinderelas(book,source.spreadsheet_id)
+                            book=fetch_workbook(source.spreadsheet_id,inspect_formulas=True) if source.format in ['cinderelas','plantoes'] else fetch_workbook(source.spreadsheet_id)
+                        if source.format in ['cinderelas','plantoes']:
+                            from schedule.cinderelas_import import sync_cinderelas,sync_plantoes
+                            summary=(sync_plantoes if source.format=='plantoes' else sync_cinderelas)(book,source.spreadsheet_id)
                         else:
                             summary=sync_workbook(book,source.spreadsheet_id)
-                        if not source.name: source.name='Cinderelas 18–24' if source.format=='cinderelas' else workbook_week_label(book)
+                        if not source.name: source.name=({'cinderelas':'Cinderelas 18–24','plantoes':'Plantões completos'}.get(source.format) or workbook_week_label(book))
                         source.error='';source.save(update_fields=['name','error'])
                         self.stdout.write(summary)
                     except Exception as error:

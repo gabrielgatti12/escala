@@ -50,7 +50,7 @@ class CinderelaExchangeTests(TestCase):
             with self.subTest(categories=(category_a, category_b)):
                 Shift.objects.filter(pk=self.offered.pk).update(category=category_a)
                 Shift.objects.filter(pk=self.requested.pk).update(category=category_b)
-                with self.assertRaisesMessage(ValidationError, 'Cinderelas só podem ser trocadas por outras cinderelas'):
+                with self.assertRaisesMessage(ValidationError, 'plantões do mesmo tipo'):
                     self.proposal()
                 self.assertFalse(Exchange.objects.exists())
                 self.assert_original_owners()
@@ -60,7 +60,7 @@ class CinderelaExchangeTests(TestCase):
             with self.subTest(groups=(group_a, group_b)):
                 Shift.objects.filter(pk=self.offered.pk).update(resident_group=group_a)
                 Shift.objects.filter(pk=self.requested.pk).update(resident_group=group_b)
-                with self.assertRaisesMessage(ValidationError, 'Cinderelas de R1 só podem ser trocadas entre R1'):
+                with self.assertRaisesMessage(ValidationError, 'Plantões de R1 só podem ser trocados entre R1'):
                     self.proposal()
                 self.assertFalse(Exchange.objects.exists())
                 self.assert_original_owners()
@@ -89,7 +89,7 @@ class CinderelaExchangeTests(TestCase):
     def test_changed_year_is_checked_again_at_acceptance(self):
         proposal = self.proposal()
         Shift.objects.filter(pk=self.requested.pk).update(resident_group='R2')
-        with self.assertRaisesMessage(ValidationError, 'Cinderelas de R1 só podem ser trocadas entre R1'):
+        with self.assertRaisesMessage(ValidationError, 'Plantões de R1 só podem ser trocados entre R1'):
             respond_exchange(self.b, proposal.pk, 'accept')
         self.assert_original_owners()
 
@@ -122,7 +122,7 @@ class CinderelaExchangeTests(TestCase):
     def test_changed_category_is_revalidated_at_acceptance(self):
         proposal = self.proposal()
         Shift.objects.filter(pk=self.requested.pk).update(category='regular')
-        with self.assertRaisesMessage(ValidationError, 'Cinderelas só podem ser trocadas por outras cinderelas'):
+        with self.assertRaisesMessage(ValidationError, 'plantões do mesmo tipo'):
             respond_exchange(self.b, proposal.pk, 'accept')
         self.assert_original_owners()
 

@@ -22,7 +22,7 @@ updated.append(f'SYNC_INTERVAL={int(interval)}')
 mode = stat.S_IMODE(path.stat().st_mode)
 temp_path = None
 try:
-    with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False) as stream:
+    with tempfile.NamedTemporaryFile(mode='w', prefix='.env.tmp-', dir=path.parent, delete=False) as stream:
         temp_path = Path(stream.name)
         stream.write('\n'.join(updated) + '\n')
     os.chmod(temp_path, mode)

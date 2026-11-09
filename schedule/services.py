@@ -4,15 +4,25 @@ from django.db.models import Q
 from django.utils import timezone
 from .models import Shift, Exchange
 
+ON_CALL_CATEGORIES=frozenset(['cinderela','night','weekend'])
+
+def _require_active_resident_ids(*resident_ids):
+    from django.contrib.auth import get_user_model
+    expected=set(resident_ids)
+    active=get_user_model().objects.filter(pk__in=expected,is_active=True).count()
+    if None in expected or active!=len(expected):
+        raise ValidationError('O acesso de um dos residentes está desativado. Peça ao administrador para revisar os acessos antes de continuar.')
+
 def exchange_group(shift):
-    if shift.category!='cinderela':
+    if shift.category not in ON_CALL_CATEGORIES:
         return shift.category
     group={'R1':'R1','R2':'R2/R3','R3':'R2/R3'}.get(shift.resident_group)
     if group is None:
-        raise ValidationError('Ano do residente não definido para a cinderela. Confira a planilha de origem antes de solicitar uma troca.')
+        raise ValidationError('Ano do residente não definido para o plantão. Confira a planilha de origem antes de solicitar uma troca.')
     return group
 
 def validate_pair(offered, requested, proposer, recipient, now=None):
+    _require_active_resident_ids(proposer.pk,recipient.pk)
     if not offered.active or not requested.active:
         raise ValidationError('Um dos plantões foi removido da planilha.')
     if offered.pk == requested.pk or proposer.pk == recipient.pk:
@@ -22,9 +32,9 @@ def validate_pair(offered, requested, proposer, recipient, now=None):
     if offered.requires_reconciliation or requested.requires_reconciliation:
         raise ValidationError('Um dos plantões precisa de conciliação. Confira a planilha de origem e resolva a divergência antes de solicitar uma troca.')
     if offered.category != requested.category:
-        raise ValidationError('Cinderelas só podem ser trocadas por outras cinderelas.')
-    if offered.category=='cinderela' and exchange_group(offered)!=exchange_group(requested):
-        raise ValidationError('Cinderelas de R1 só podem ser trocadas entre R1. R2 e R3 podem trocar entre si.')
+        raise ValidationError('A troca deve ser entre plantões do mesmo tipo: cinderela, noturno ou final de semana. Atividades regulares só podem ser trocadas por atividades regulares.')
+    if offered.category in ON_CALL_CATEGORIES and exchange_group(offered)!=exchange_group(requested):
+        raise ValidationError('Plantões de R1 só podem ser trocados entre R1. R2 e R3 podem trocar entre si.')
     if min(offered.starts_at, requested.starts_at) <= (now or timezone.now()):
         raise ValidationError('Só é possível trocar plantões futuros.')
     for resident, incoming in [(proposer, requested), (recipient, offered)]:
@@ -49,6 +59,7 @@ def propose_exchange(user, offered_id, requested_id):
 @transaction.atomic
 def respond_exchange(user, pk, action):
     exchange = Exchange.objects.select_for_update().get(pk=pk)
+    _require_active_resident_ids(user.pk,exchange.proposer_id,exchange.recipient_id)
     if exchange.status != 'pending':
         raise ValidationError('Esta solicitação já foi encerrada.')
     if action == 'cancel' and exchange.proposer_id == user.pk:
@@ -87,6 +98,7 @@ def expire_pending_requests(now=None):
     }
 
 def validate_allocation(user,mine,theirs,now=None):
+    _require_active_resident_ids(user.pk)
     if min(mine.starts_at,theirs.starts_at)<=(now or timezone.now()):
         raise ValidationError('Só é possível dividir atividades futuras.')
     if mine.pk==theirs.pk or timezone.localdate(mine.starts_at)!=timezone.localdate(theirs.starts_at):
@@ -94,7 +106,9 @@ def validate_allocation(user,mine,theirs,now=None):
     if mine.starts_at>=theirs.ends_at or theirs.starts_at>=mine.ends_at:
         raise ValidationError('Atividades em sequência devem ser cumpridas nos respectivos horários e não podem ser divididas entre os residentes.')
     participants=set(mine.residents.values_list('pk',flat=True))
-    if len(participants)!=2 or user.pk not in participants or participants!=set(theirs.residents.values_list('pk',flat=True)):
+    other_participants=set(theirs.residents.values_list('pk',flat=True))
+    _require_active_resident_ids(user.pk,*participants,*other_participants)
+    if len(participants)!=2 or user.pk not in participants or participants!=other_participants:
         raise ValidationError('As duas atividades devem pertencer à mesma dupla.')
     if any(not a.active or a.allocated_to_id for a in [mine,theirs]):
         raise ValidationError('Uma das atividades já foi definida ou removida.')
@@ -121,6 +135,7 @@ def propose_allocation(user,mine_id,theirs_id):
 @transaction.atomic
 def respond_allocation(user,pk,action):
     allocation=Allocation.objects.select_for_update().get(pk=pk)
+    _require_active_resident_ids(user.pk,allocation.proposer_id,allocation.recipient_id)
     if allocation.status!='pending': raise ValidationError('Proposta já encerrada.')
     if action=='cancel' and allocation.proposer_id==user.pk:
         allocation.status='cancelled'
@@ -150,6 +165,7 @@ from .models import ExchangeTopic, ForumComment
 
 @transaction.atomic
 def set_exchange_interest(user,shift_id,desired=None):
+    _require_active_resident_ids(user.pk)
     shift=Shift.objects.select_for_update().get(pk=shift_id)
     if shift.resident_id!=user.pk:
         raise ValidationError('Somente o titular pode publicar este plantão.')
@@ -168,6 +184,7 @@ def set_exchange_interest(user,shift_id,desired=None):
 
 @transaction.atomic
 def add_forum_comment(user,topic_id,text):
+    _require_active_resident_ids(user.pk)
     topic=ExchangeTopic.objects.get(pk=topic_id)
     shift=Shift.objects.select_for_update().get(pk=topic.shift_id)
     topic=ExchangeTopic.objects.select_for_update().get(pk=topic_id)
@@ -181,6 +198,7 @@ def add_forum_comment(user,topic_id,text):
 
 @transaction.atomic
 def withdraw_forum_topic(user,topic_id):
+    _require_active_resident_ids(user.pk)
     topic=ExchangeTopic.objects.get(pk=topic_id)
     shift=Shift.objects.select_for_update().get(pk=topic.shift_id)
     topic=ExchangeTopic.objects.select_for_update().get(pk=topic_id)

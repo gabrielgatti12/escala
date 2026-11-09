@@ -71,7 +71,7 @@ def discover_folder(session,folder):
     folder.last_success=timezone.now();folder.error='';folder.save(update_fields=['last_success','error'])
     return len(sheets)
 
-def fetch_private_workbook(session,spreadsheet_id, *, inspect_formulas=False):
+def fetch_private_workbook(session,spreadsheet_id, *, inspect_formulas=True):
     spreadsheet_id=valid_id(spreadsheet_id)
     with session.get(f'{API}/files/{spreadsheet_id}/export',params={'mimeType':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},timeout=60,stream=True) as response:
         response.raise_for_status()

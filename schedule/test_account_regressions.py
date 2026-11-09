@@ -38,14 +38,16 @@ class ContactAccountRegressionTests(TestCase):
         account = get_user_model().objects.create_user(
             'existing@example.test', password='Alias-existing-password-739!',
         )
-        ResidentAccess.objects.create(account=account, resident=self.resident)
         legacy = Client()
         self.assertTrue(legacy.login(username=self.resident.username, password=self.password))
+        ResidentAccess.objects.create(account=account, resident=self.resident)
 
         apply_contacts('Source Resident,updated@example.test', {0})
 
         account.refresh_from_db()
         self.assertTrue(account.check_password('Alias-existing-password-739!'))
+        self.resident.refresh_from_db()
+        self.assertFalse(self.resident.has_usable_password())
         self.assertTrue(self.client.login(username='updated@example.test', password='Alias-existing-password-739!'))
         self.assertFalse(self.client.login(username=self.resident.username, password=self.password))
         self.assertRedirects(legacy.get('/'), '/accounts/login/?next=/')

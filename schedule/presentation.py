@@ -4,6 +4,13 @@ import re
 import unicodedata
 from functools import lru_cache
 
+def sector_label(label):
+    """Display the activity before its location without changing stored keys."""
+    location, separator, activity = str(label or '').partition(' · ')
+    if separator and activity.strip() and location.strip().upper() in {'HOSPITAL', 'INSTITUTO', 'UNEX', 'EXTERNO', 'OUTROS'}:
+        return f'{activity.strip()} · {location.strip()}'
+    return label
+
 def sector_key(label):
     text=unicodedata.normalize('NFKD',label).encode('ascii','ignore').decode().casefold()
     return re.sub(r'\s+',' ',text).strip()

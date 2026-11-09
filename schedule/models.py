@@ -30,8 +30,13 @@ class Shift(models.Model):
     @property
     def source_url(self):
         return f"https://docs.google.com/spreadsheets/d/{self.source}/edit?range="+quote("'"+self.source_tab.replace("'","''")+"'!"+self.source_cell) if self.source and self.source_cell else ''
+    @property
+    def display_sector(self):
+        from .presentation import sector_label
+        return sector_label(self.sector)
+
     def __str__(self):
-        return f'{self.resident.get_full_name() or self.resident.username} · {timezone.localtime(self.starts_at):%d/%m %H:%M} · {self.sector}'
+        return f'{self.resident.get_full_name() or self.resident.username} · {timezone.localtime(self.starts_at):%d/%m %H:%M} · {self.display_sector}'
 class Exchange(models.Model):
     offered = models.ForeignKey(Shift,on_delete=models.PROTECT,related_name='offers')
     requested = models.ForeignKey(Shift,on_delete=models.PROTECT,related_name='requests')
@@ -80,8 +85,13 @@ class SharedActivity(models.Model):
     @property
     def source_url(self):
         return f"https://docs.google.com/spreadsheets/d/{self.source}/edit?range="+quote("'"+self.source_tab.replace("'","''")+"'!"+self.source_cell) if self.source and self.source_cell else ''
+    @property
+    def display_sector(self):
+        from .presentation import sector_label
+        return sector_label(self.sector)
+
     def __str__(self):
-        return f'{timezone.localtime(self.starts_at):%d/%m %H:%M} · {self.sector}'
+        return f'{timezone.localtime(self.starts_at):%d/%m %H:%M} · {self.display_sector}'
     class Meta:
         ordering = ['starts_at','sector']
 

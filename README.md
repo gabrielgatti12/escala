@@ -142,3 +142,9 @@ Trocas aceitas no aplicativo são preservadas enquanto a planilha mantém a atri
 Para aplicar na Oracle, siga [deploy/README.md](deploy/README.md). Atualizar o repositório e aplicar as migrações são passos de implantação; a importação deve ser conferida pelo resumo da fonte e pelo comando `sync_status` na própria instância.
 
 Validação de 09/11/2026: 328 testes passaram, incluindo importação automática dos três tipos, preservação dos IDs de cinderelas, consentimento e grupos nas trocas, revogação de acesso, limite de tentativas de login e limites de XLSX. Fórmulas com texto vazio confirmado no arquivo Google são aceitas; fórmulas sem resultado armazenado preservam a origem anterior.
+
+## Navegação e títulos do calendário
+
+A versão de 12/11/2026 mostra **atividade · local**, inclusive no download e na assinatura Google. As opções de troca são buscadas somente ao abrir a janela, em até 50 resultados por busca, sem carregar todos os meses em cada página. Busque nome, setor, data ou horário para localizar outros plantões. O aceite continua sendo do destinatário e todas as regras são revalidadas no servidor.
+
+A migração **0017** adiciona índices para as consultas do calendário. A página da própria semana enviou aproximadamente 88% menos HTML na comparação local; **343 testes passaram**. Medições, validações e limites estão em [docs/desempenho-calendario-2026-11-12.md](docs/desempenho-calendario-2026-11-12.md). Para ativar na Oracle, atualize o código, reconstrua os serviços e aplique as migrações conforme [deploy/README.md](deploy/README.md).

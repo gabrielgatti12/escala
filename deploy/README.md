@@ -1,5 +1,27 @@
 # Implantação na instância Oracle
 
+## Atualização de 12/11/2026: navegação do calendário
+
+Esta atualização requer a migração **0017**, que cria índices para a navegação. A janela de troca passa a consultar opções sob demanda no servidor e os títulos do calendário exportado usam atividade antes do local.
+
+```bash
+cd /opt/escala-app &&
+git pull --ff-only origin codex/escala-inicial &&
+bash scripts/oracle-compose.sh build &&
+bash scripts/oracle-compose.sh stop web sync &&
+bash scripts/oracle-compose.sh run --rm web python manage.py migrate --noinput &&
+bash scripts/oracle-compose.sh up -d &&
+bash scripts/oracle-compose.sh exec -T web python manage.py sync_status
+```
+
+Não reinicie os serviços se a migração falhar; confira o erro antes de retomá-los. Preserve o volume `data` e os arquivos privados. O wrapper preserva os complementos de credenciais do Drive. O intervalo diário configurado continua em uso.
+
+Depois de aplicar, recarregue a página para obter o JavaScript novo. Confira a navegação entre semanas, a busca ao abrir Solicitar troca e o envio/aceite com contas distintas. A busca mostra até 50 opções; nome, setor, data e horário localizam os demais plantões. Um erro de rede bloqueia o envio e oferece nova tentativa. A assinatura Google depende da próxima releitura pelo próprio Google.
+
+As [medições e validações locais](../docs/desempenho-calendario-2026-11-12.md) não comprovam a implantação ou o tempo de resposta na Oracle.
+
+## Instalação inicial
+
 Arquivos preparados; a imagem de produção ainda precisa ser construída e validada na instância. Docker Engine com Compose é pré-requisito. A aplicação escuta apenas em loopback no host; não abra a porta 8000 no firewall público.
 
 1. Copie o projeto para uma pasta da instância (não copie o banco de desenvolvimento com dados reais sem definir o procedimento de migração).

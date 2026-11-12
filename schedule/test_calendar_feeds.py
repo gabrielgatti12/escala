@@ -258,3 +258,35 @@ class CalendarSubscriptionTests(TestCase):
         self.assertNotIn('\x7f', output)
         self.assertTrue(all(len(line.encode('utf-8')) <= 75 for line in output.split('\r\n')))
         self.assertTrue(output.endswith('END:VCALENDAR\r\n'))
+
+    def test_calendar_views_download_and_subscription_use_activity_before_location(self):
+        token = self.create_subscription()
+        feed_url = reverse('calendar_feed', args=[token])
+        date = timezone.localdate(self.start)
+        original_id = self.shift.external_id
+        for raw, displayed in [
+            ('HOSPITAL · PA (Pronto Atendimento)', 'PA (Pronto Atendimento) · HOSPITAL'),
+            ('INSTITUTO\u00a0·\u00a0Refração', 'Refração · INSTITUTO'),
+        ]:
+            with self.subTest(label=raw):
+                self.shift.sector = raw
+                self.shift.save(update_fields=['sector'])
+                for path, params in [
+                    ('/', {'week': date.isoformat()}),
+                    ('/', {'week': date.isoformat(), 'layout': 'sector'}),
+                    (reverse('calendar'), {'month': date.strftime('%Y-%m')}),
+                ]:
+                    self.assertContains(self.client.get(path, params), f'<h3>{displayed}</h3>', html=True)
+                for response in [self.client.get(reverse('calendar_ics')), Client().get(feed_url)]:
+                    self.assertEqual(response.status_code, 200)
+                    text = response.content.decode().replace('\r\n ', '')
+                    self.assertIn(f'SUMMARY:{displayed}\r\n', text)
+                    self.assertIn(f'UID:shift-{self.shift.pk}@escala\r\n', text)
+                self.shift.refresh_from_db()
+                self.assertEqual(self.shift.sector, raw)
+                self.assertEqual(self.shift.external_id, original_id)
+
+    def test_monthly_duty_names_are_not_reversed_in_calendar_export(self):
+        self.shift.sector = 'Cinderela · R1'
+        text = serialize_calendar([self.shift]).replace('\r\n ', '')
+        self.assertIn('SUMMARY:Cinderela · R1\r\n', text)

@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.urls import path, include
-from schedule import views, calendar_feeds, notifications, source_actions
+from schedule import views, calendar_feeds, notifications, source_actions, exchange_choices
 from django.views.generic import TemplateView
 urlpatterns = [
     path('fontes/atualizar/',source_actions.request_source_refresh,name='request_source_refresh'),
@@ -32,6 +32,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('accounts/',include('django.contrib.auth.urls')),
     path('',views.dashboard,name='dashboard'),
+    path('trocas/opcoes/',exchange_choices.choices,name='exchange_choices'),
     path('trocas/criar/',views.propose,name='propose'),
     path('trocas/<int:pk>/<str:action>/',views.respond,name='respond'),
 ]

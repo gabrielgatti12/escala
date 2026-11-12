@@ -26,6 +26,11 @@ class Shift(models.Model):
     sector = models.CharField(max_length=120)
     class Meta:
         ordering = ['starts_at']
+        indexes = [
+            models.Index(fields=['starts_at'], condition=models.Q(active=True), name='shift_active_start'),
+            models.Index(fields=['resident', 'starts_at'], condition=models.Q(active=True), name='shift_resident_active_start'),
+            models.Index(fields=['source', 'active'], name='shift_source_active'),
+        ]
         constraints = [models.CheckConstraint(condition=models.Q(ends_at__gt=models.F('starts_at')),name='positive_shift_duration')]
     @property
     def source_url(self):
@@ -94,6 +99,10 @@ class SharedActivity(models.Model):
         return f'{timezone.localtime(self.starts_at):%d/%m %H:%M} · {self.display_sector}'
     class Meta:
         ordering = ['starts_at','sector']
+        indexes = [
+            models.Index(fields=['starts_at'], condition=models.Q(active=True), name='shared_active_start'),
+            models.Index(fields=['source', 'active'], name='shared_source_active'),
+        ]
 
 class Allocation(models.Model):
     proposer = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,related_name='allocation_proposals')

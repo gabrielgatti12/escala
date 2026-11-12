@@ -11,12 +11,12 @@ def next_activity_day(resident, now):
         query = model.objects.filter(active=True, ends_at__gt=now, **{owner: resident})
         if model is SharedActivity:
             query = query.filter(allocated_to__isnull=True)
-        item = query.order_by('starts_at').first()
-        if item:
-            dates.append(timezone.localdate(item.starts_at))
-    missing = IncompleteActivity.objects.filter(residents=resident, date__gte=today).order_by('date').first()
-    if missing:
-        dates.append(missing.date)
+        starts_at = query.order_by('starts_at').values_list('starts_at', flat=True).first()
+        if starts_at:
+            dates.append(timezone.localdate(starts_at))
+    missing_day = IncompleteActivity.objects.filter(residents=resident, date__gte=today).order_by('date').values_list('date', flat=True).first()
+    if missing_day:
+        dates.append(missing_day)
     return min(dates) if dates else None
 
 

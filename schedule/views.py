@@ -11,7 +11,7 @@ from .services import propose_exchange, respond_exchange
 from .identity import resident_for_account,operational_residents
 @login_required
 def dashboard(request,account_form=None):
-    from datetime import date,timedelta
+    from datetime import date,datetime,time,timedelta
     from django.contrib.auth import get_user_model
     from django.db.models import Count,Min,Max
     from django.http import HttpResponseForbidden
@@ -29,7 +29,7 @@ def dashboard(request,account_form=None):
     future=active.filter(starts_at__gt=now)
     exchangeable=future.filter(requires_reconciliation=False)
     from .calendar_data import next_activity_day,allocation_choices
-    default_day=next_activity_day(person,now)
+    default_day=next_activity_day(person,now) if tab=='week' and not request.GET.get('week') else today
     if default_day is None:
         upcoming=future.first()
         default_day=timezone.localdate(upcoming.starts_at) if upcoming else today
@@ -40,52 +40,58 @@ def dashboard(request,account_form=None):
         selected=default_day
     week_start=selected-timedelta(days=selected.weekday())
     week_next=week_start+timedelta(days=7)
-    window={'starts_at__date__gte':week_start,'starts_at__date__lt':week_next}
-    weekly=active.filter(**window)
+    window={'starts_at__gte':timezone.make_aware(datetime.combine(week_start,time.min)),
+            'starts_at__lt':timezone.make_aware(datetime.combine(week_next,time.min))}
     shared=SharedActivity.objects.filter(active=True,allocated_to__isnull=True).prefetch_related('residents')
-    weekly_shared=shared.filter(**window)
-    incomplete=IncompleteActivity.objects.filter(date__gte=week_start,date__lt=week_next).prefetch_related('residents')
-    own_week_count=weekly.filter(resident=person).count()
-    own_shared_count=weekly_shared.filter(residents=person).count()
-    if scope=='mine':
-        weekly=weekly.filter(resident=person)
-        weekly_shared=weekly_shared.filter(residents=person)
-        incomplete=incomplete.filter(residents=person)
-    resident_id=request.GET.get('resident','')
-    if resident_id.isdigit():
-        weekly=weekly.filter(resident_id=int(resident_id))
-        weekly_shared=weekly_shared.filter(residents__pk=int(resident_id))
-        incomplete=incomplete.filter(residents__pk=int(resident_id))
-    if request.GET.get('interest')=='1':
-        weekly=weekly.filter(wants_exchange=True)
-        weekly_shared=weekly_shared.none()
-        incomplete=incomplete.none()
-    grouped={};pending={};missing={}
-    for item in weekly: grouped.setdefault(timezone.localtime(item.starts_at).date(),[]).append(item)
-    for item in weekly_shared: pending.setdefault(timezone.localtime(item.starts_at).date(),[]).append(item)
-    for item in incomplete: missing.setdefault(item.date,[]).append(item)
-    days=[]
-    for offset in range(7):
-        day=week_start+timedelta(days=offset)
-        shifts=grouped.get(day,[]);unassigned=pending.get(day,[]);no_time=missing.get(day,[])
-        days.append({'date':day,'shifts':shifts,'shared':unassigned,'incomplete':no_time,'today':day==today,'weekend':offset>4,'count':len(shifts)+len(unassigned)+len(no_time)})
-    residents=operational_residents().filter(is_active=True).order_by('first_name','username')
+    days=[];own_week_count=0;own_shared_count=0
+    if tab=='week':
+        weekly=active.filter(**window)
+        weekly_shared=shared.filter(**window)
+        incomplete=IncompleteActivity.objects.filter(date__gte=week_start,date__lt=week_next).prefetch_related('residents')
+        own_week_count=weekly.filter(resident=person).count()
+        own_shared_count=weekly_shared.filter(residents=person).count()
+        if scope=='mine':
+            weekly=weekly.filter(resident=person)
+            weekly_shared=weekly_shared.filter(residents=person)
+            incomplete=incomplete.filter(residents=person)
+        resident_id=request.GET.get('resident','')
+        if resident_id.isdigit():
+            weekly=weekly.filter(resident_id=int(resident_id))
+            weekly_shared=weekly_shared.filter(residents__pk=int(resident_id))
+            incomplete=incomplete.filter(residents__pk=int(resident_id))
+        if request.GET.get('interest')=='1':
+            weekly=weekly.filter(wants_exchange=True)
+            weekly_shared=weekly_shared.none()
+            incomplete=incomplete.none()
+        grouped={};pending={};missing={}
+        for item in weekly: grouped.setdefault(timezone.localtime(item.starts_at).date(),[]).append(item)
+        for item in weekly_shared: pending.setdefault(timezone.localtime(item.starts_at).date(),[]).append(item)
+        for item in incomplete: missing.setdefault(item.date,[]).append(item)
+        days=[]
+        for offset in range(7):
+            day=week_start+timedelta(days=offset)
+            shifts=grouped.get(day,[]);unassigned=pending.get(day,[]);no_time=missing.get(day,[])
+            days.append({'date':day,'shifts':shifts,'shared':unassigned,'incomplete':no_time,'today':day==today,'weekend':offset>4,'count':len(shifts)+len(unassigned)+len(no_time)})
+    residents=operational_residents().filter(is_active=True).order_by('first_name','username') if tab=='week' or request.user.is_superuser else []
     exchanges=Exchange.objects.filter(Q(proposer=person)|Q(recipient=person)).select_related('offered','requested','proposer','recipient')
     allocations=Allocation.objects.filter(Q(proposer=person)|Q(recipient=person)).select_related('mine','theirs','proposer','recipient').order_by('-created_at')
     pending_exchanges=exchanges.filter(status='pending',offered__starts_at__gt=now,requested__starts_at__gt=now)
     pending_allocations=allocations.filter(status='pending',mine__starts_at__gt=now,theirs__starts_at__gt=now)
-    pending_count=pending_exchanges.count()+pending_allocations.count()
-    received_count=pending_exchanges.filter(recipient=person).count()+pending_allocations.filter(recipient=person).count()
-    allocation_options=allocation_choices(shared.filter(residents=person,starts_at__gt=now))
+    exchange_counts=pending_exchanges.aggregate(total=Count('pk'),received=Count('pk',filter=Q(recipient=person)),sent=Count('pk',filter=Q(proposer=person)))
+    allocation_counts=pending_allocations.aggregate(total=Count('pk'),received=Count('pk',filter=Q(recipient=person)),sent=Count('pk',filter=Q(proposer=person)))
+    pending_count=exchange_counts['total']+allocation_counts['total']
+    received_count=exchange_counts['received']+allocation_counts['received']
+    allocation_options=allocation_choices(shared.filter(residents=person,starts_at__gt=now)) if tab in ['week','requests'] else []
     allocation_eligible_ids={option['activity'].pk for option in allocation_options}
     my_shared=[option['activity'] for option in allocation_options]
-    states={state.source:state for state in SyncState.objects.all()}
     source_cards=[]
-    if request.user.is_superuser:
-        totals={item['source']:item['total'] for item in active.values('source').annotate(total=Count('pk'))}
+    if tab=='sources':
+        states={state.source:state for state in SyncState.objects.all()}
+        totals={item['source']:item['total'] for item in active.order_by().values('source').annotate(total=Count('pk'))}
         for source in SheetSource.objects.select_related('folder').all().order_by('name','pk'):
             source_cards.append({'source':source,'state':states.get(source.spreadsheet_id),'count':totals.get(source.spreadsheet_id,0)})
-    bounds=active.aggregate(first=Min('starts_at'),last=Max('ends_at'))
+    has_future=future.exists() if tab in ['week','requests'] else False
+    bounds=active.aggregate(first=Min('starts_at'),last=Max('ends_at')) if tab=='week' and not has_future else {}
     from .presentation import sector_rows
     box=request.GET.get('box','received')
     if box not in ['received','sent','history']:box='received'
@@ -112,11 +118,11 @@ def dashboard(request,account_form=None):
         access_accounts=ResidentAccess.objects.select_related('account','resident').order_by('resident__first_name')
         direct_accounts=operational_residents().filter(is_active=True).exclude(password__startswith='!').order_by('first_name','username')
     return render(request,'dashboard.html',{
-        'sector_rows':sector_rows(days),'layout':'sector' if request.GET.get('layout')=='sector' else 'day','account_form':account_form,'access_accounts':access_accounts,'direct_accounts':direct_accounts,'box':box,'sent_count':pending_exchanges.filter(proposer=person).count()+pending_allocations.filter(proposer=person).count(),'incoming_preview':pending_exchanges.filter(recipient=person)[:4],'tab':tab,'scope':scope,'resident_user':person,'linked':person.pk!=request.user.pk,'resident_choices':residents,'residents':residents,
+        'sector_rows':sector_rows(days),'layout':'sector' if request.GET.get('layout')=='sector' else 'day','account_form':account_form,'access_accounts':access_accounts,'direct_accounts':direct_accounts,'box':box,'sent_count':exchange_counts['sent']+allocation_counts['sent'],'incoming_preview':pending_exchanges.filter(recipient=person)[:4],'tab':tab,'scope':scope,'resident_user':person,'linked':person.pk!=request.user.pk,'resident_choices':residents,'residents':residents,
         'days':days,'week_start':week_start,'week_last':week_next-timedelta(days=1),'week_previous':week_start-timedelta(days=7),'week_next':week_next,'today':today,'now':now,
         'own_week_count':own_week_count,'own_shared_count':own_shared_count,'pending_count':pending_count,'received_count':received_count,
-        'future_count':future.count(),'has_offered':exchangeable.filter(resident=person).exists(),'has_requested':exchangeable.exclude(resident=person).exists(),
-        'offered':exchangeable.filter(resident=person),'requested':exchangeable.exclude(resident=person),'bounds':bounds,
+        'future_count':has_future,'has_offered':exchangeable.filter(resident=person).exists() if tab in ['week','requests'] else False,'has_requested':exchangeable.exclude(resident=person).exists() if tab in ['week','requests'] else False,
+        'offered':[],'requested':[],'bounds':bounds,
         'exchanges':displayed_exchanges[:100],'recent_exchanges':exchanges[:4],'allocations':displayed_allocations[:100],'my_shared':my_shared,'allocation_options':allocation_options,'allocation_eligible_ids':allocation_eligible_ids,
         'latest_sync':SyncState.objects.filter(last_success__isnull=False).order_by('-last_success').first(),'source_cards':source_cards,'drive_folders':DriveFolder.objects.all() if request.user.is_superuser else [],'sync_health':sync_health_status,
     })
@@ -182,13 +188,14 @@ def allocation_respond(request,pk,action):
 @login_required
 def calendar_view(request):
     import calendar
-    from datetime import date,timedelta
+    from datetime import date,datetime,time,timedelta
     today=timezone.localdate()
     try:
         month=date.fromisoformat(request.GET.get('month',today.strftime('%Y-%m'))+'-01')
         if month.year in [1,9999]:month=today.replace(day=1)
     except ValueError: month=today.replace(day=1)
-    shifts=Shift.objects.filter(active=True,starts_at__year=month.year,starts_at__month=month.month).select_related('resident')
+    next_month=(month+timedelta(days=32)).replace(day=1)
+    shifts=Shift.objects.filter(active=True,starts_at__gte=timezone.make_aware(datetime.combine(month,time.min)),starts_at__lt=timezone.make_aware(datetime.combine(next_month,time.min))).select_related('resident')
     if request.GET.get('all')!='1': shifts=shifts.filter(resident=resident_for_account(request.user))
     days={}
     for shift in shifts:
@@ -272,7 +279,7 @@ def register_source(request):
 
 def forum_exchange_context(person):
     future=Shift.objects.filter(active=True,starts_at__gt=timezone.now(),requires_reconciliation=False).select_related('resident')
-    return {'resident_user':person,'tab':'forum','offered':future.filter(resident=person),'requested':future.exclude(resident=person),'future_count':future.count(),'has_offered':future.filter(resident=person).exists(),'has_requested':future.exclude(resident=person).exists()}
+    return {'resident_user':person,'tab':'forum','offered':[],'requested':[],'future_count':future.exists(),'has_offered':future.filter(resident=person).exists(),'has_requested':future.exclude(resident=person).exists()}
 
 @login_required
 def forum(request):

@@ -6,7 +6,7 @@ from functools import lru_cache
 
 def sector_label(label):
     """Display the activity before its location without changing stored keys."""
-    location, separator, activity = str(label or '').partition(' · ')
+    location, separator, activity = str(label or '').partition('·')
     if separator and activity.strip() and location.strip().upper() in {'HOSPITAL', 'INSTITUTO', 'UNEX', 'EXTERNO', 'OUTROS'}:
         return f'{activity.strip()} · {location.strip()}'
     return label

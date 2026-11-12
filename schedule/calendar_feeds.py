@@ -148,6 +148,7 @@ def _fold_line(line):
 
 def serialize_calendar(shifts):
     """RFC 5545 text shared by downloads and subscription responses."""
+    from .presentation import sector_label
     stamp = timezone.now().astimezone(utc.utc).strftime('%Y%m%dT%H%M%SZ')
     lines = [
         'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Escala//Residencia//PT',
@@ -158,7 +159,7 @@ def serialize_calendar(shifts):
             'BEGIN:VEVENT', f'UID:shift-{shift.pk}@escala', f'DTSTAMP:{stamp}',
             f'DTSTART:{shift.starts_at.astimezone(utc.utc):%Y%m%dT%H%M%SZ}',
             f'DTEND:{shift.ends_at.astimezone(utc.utc):%Y%m%dT%H%M%SZ}',
-            f'SUMMARY:{_escape_text(shift.sector)}', 'END:VEVENT',
+            f'SUMMARY:{_escape_text(sector_label(shift.sector))}', 'END:VEVENT',
         ])
     lines.append('END:VCALENDAR')
     return '\r\n'.join(_fold_line(line) for line in lines) + '\r\n'

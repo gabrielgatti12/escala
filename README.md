@@ -148,3 +148,11 @@ Validação de 09/11/2026: 328 testes passaram, incluindo importação automáti
 A versão de 12/11/2026 mostra **atividade · local**, inclusive no download e na assinatura Google. As opções de troca são buscadas somente ao abrir a janela, em até 50 resultados por busca, sem carregar todos os meses em cada página. Busque nome, setor, data ou horário para localizar outros plantões. O aceite continua sendo do destinatário e todas as regras são revalidadas no servidor.
 
 A migração **0017** adiciona índices para as consultas do calendário. A página da própria semana enviou aproximadamente 88% menos HTML na comparação local; **343 testes passaram**. Medições, validações e limites estão em [docs/desempenho-calendario-2026-11-12.md](docs/desempenho-calendario-2026-11-12.md). Para ativar na Oracle, atualize o código, reconstrua os serviços e aplique as migrações conforme [deploy/README.md](deploy/README.md).
+
+## Acordo diário dos residentes espelho
+
+A negociação se aplica somente às atividades que oferecem **Combinar divisão**, com duas atividades disponíveis da mesma dupla no dia e horários sobrepostos. As outras atividades seguem a escala importada. A dupla pode combinar livremente os setores em cada dia, sem cota semanal ou alternância obrigatória: distribuições 4–1 e 5–0 no mesmo setor são permitidas quando ambos concordam.
+
+**Concordo e envio para o colega** registra o aceite de quem propõe e cria uma solicitação pendente. A tela identifica quem já concordou e de quem falta o aceite. Apenas o destinatário pode aceitar a divisão; só depois são criadas as duas atividades na escala final. Cada dia exige seu próprio acordo. Recusar ou cancelar mantém as atividades sem definição, e propostas pendentes não aparecem na exportação final do calendário.
+
+Validação desse fluxo: **350 testes passaram**, incluindo semanas sem cota, consentimento por dia, pendências fora do calendário final e proteção das atividades que não permitem divisão.

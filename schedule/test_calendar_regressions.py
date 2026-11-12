@@ -58,7 +58,7 @@ class CalendarNavigationTests(TestCase):
         history = self.client.get('/?tab=requests&box=history')
         self.assertContains(history, 'Prazo encerrado', count=2)
         self.assertNotContains(history, 'Aceitar troca')
-        self.assertNotContains(history, 'Aceitar divisão e atualizar calendário')
+        self.assertNotContains(history, 'Concordo com a divisão e atualizo a escala')
         exchange.refresh_from_db()
         self.assertEqual(exchange.status, 'pending')  # GET does not mutate requests.
 

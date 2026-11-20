@@ -1,9 +1,15 @@
-from schedule import google_editor, sheets_write_views
+from schedule import google_editor, sheets_write_views, bundle_views
 from django.contrib import admin
 from django.urls import path, include
 from schedule import views, calendar_feeds, notifications, source_actions, exchange_choices
 from django.views.generic import TemplateView
 urlpatterns = [
+    path('trocas/combinadas/',bundle_views.compose,name='bundle_compose'),
+    path('trocas/combinadas/preparar/',bundle_views.prepare,name='bundle_prepare'),
+    path('trocas/combinadas/enviar/',bundle_views.confirm,name='bundle_confirm'),
+    path('trocas/combinadas/<int:pk>/',bundle_views.detail,name='bundle_detail'),
+    path('trocas/combinadas/<int:pk>/<str:action>/',bundle_views.respond,name='bundle_respond'),
+    path('google/planilhas/conjuntos/<int:pk>/previa/',sheets_write_views.preview_bundle,name='sheets_write_bundle_preview'),
     path('google/planilhas/',sheets_write_views.pilot,name='sheets_write_pilot'),
     path('google/planilhas/configurar/',sheets_write_views.configure,name='sheets_write_configure'),
     path('google/planilhas/conectar/',google_editor.connect,name='google_editor_connect'),

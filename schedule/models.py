@@ -253,7 +253,8 @@ class SheetsWritePilot(models.Model):
 
 
 class SheetsWritePreview(models.Model):
-    exchange = models.ForeignKey(Exchange, on_delete=models.PROTECT)
+    exchange = models.ForeignKey(Exchange, on_delete=models.PROTECT, null=True, blank=True)
+    bundle = models.ForeignKey('BundleExchange', on_delete=models.PROTECT, null=True, blank=True)
     account = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     source = models.ForeignKey(SheetSource, on_delete=models.PROTECT)
     plan = models.JSONField(default=dict)
@@ -262,3 +263,53 @@ class SheetsWritePreview(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     message = models.CharField(max_length=250, blank=True)
+
+    @property
+    def decision_label(self):
+        return f'Troca de conjunto #{self.bundle_id}' if self.bundle_id else f'Troca #{self.exchange_id}'
+
+    class Meta:
+        constraints = [models.CheckConstraint(
+            condition=(models.Q(exchange__isnull=False,bundle__isnull=True)|models.Q(exchange__isnull=True,bundle__isnull=False)),
+            name='sheets_preview_one_decision',
+        )]
+
+
+class BundleExchange(models.Model):
+    """A reviewed exchange of one or more regular activities on each side."""
+    proposer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='bundle_proposals')
+    recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='bundle_inbox')
+    mode = models.CharField(max_length=12, choices=[('day','Dia inteiro de estágios'),('selected','Atividades escolhidas')])
+    status = models.CharField(max_length=12, choices=Exchange._meta.get_field('status').choices, default='pending')
+    snapshot = models.JSONField(default=dict)
+    fingerprint = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    proposer_acknowledged_at = models.DateTimeField()
+    recipient_acknowledged_at = models.DateTimeField(null=True, blank=True)
+    shifts = models.ManyToManyField(Shift, through='BundleExchangeItem', related_name='bundle_exchanges')
+
+    @property
+    def is_expired(self):
+        from django.utils.dateparse import parse_datetime
+        value = self.snapshot.get('earliest_start')
+        try:
+            starts_at = parse_datetime(value) if isinstance(value,str) else None
+        except ValueError:
+            starts_at = None
+        return self.status=='pending' and (starts_at is None or starts_at <= timezone.now())
+
+    class Meta:
+        ordering = ['-created_at','-pk']
+        indexes = [models.Index(fields=['status','recipient'],name='bundle_status_recipient')]
+
+
+class BundleExchangeItem(models.Model):
+    exchange = models.ForeignKey(BundleExchange, on_delete=models.CASCADE, related_name='items')
+    shift = models.ForeignKey(Shift, on_delete=models.PROTECT, related_name='bundle_items')
+    side = models.CharField(max_length=10, choices=[('offered','Oferecida'),('requested','Solicitada')])
+    original_owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='bundle_original_items')
+
+    class Meta:
+        ordering = ['side','shift__starts_at','pk']
+        constraints = [models.UniqueConstraint(fields=['exchange','shift'],name='bundle_unique_shift')]

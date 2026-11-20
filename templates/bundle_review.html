@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-heading"><div><div class="eyebrow">DUAS CONFERÊNCIAS · UMA PROPOSTA PRIVADA</div><h1>{% if bundle %}Proposta #{{ bundle.pk }}{% else %}Conferir a proposta{% endif %}</h1><p>{% if bundle %}{{ bundle.get_mode_display }} · {{ bundle.get_status_display }}{% else %}Nada muda na escala até você enviar e o colega também aceitar.{% endif %}</p></div><a class="button secondary" href="/?tab=requests">Voltar às solicitações</a></div>
+<section class="panel bundle-panel">{% include 'components/bundle_report.html' %}</section>
+{% if stage == 'propose' %}
+<section class="panel bundle-panel"><h2>Seu aceite</h2><form method="post" action="{% url 'bundle_confirm' %}">{% csrf_token %}<input type="hidden" name="review_token" value="{{ review_token }}">{% include 'components/bundle_acknowledgement.html' %}<button class="button primary">Concordo e envio diretamente ao residente</button></form><a class="text-link" href="{% url 'bundle_compose' %}">Voltar e preparar outra escolha</a></section>
+{% else %}
+<section class="panel bundle-panel"><h2>Confirmação dos dois residentes</h2><p>{{ bundle.proposer.get_full_name|default:bundle.proposer.username }} concordou ao enviar em {{ bundle.proposer_acknowledged_at|date:'d/m H:i' }}.</p>
+{% if bundle.status == 'accepted' %}<p>{{ bundle.recipient.get_full_name|default:bundle.recipient.username }} conferiu e aceitou em {{ bundle.recipient_acknowledged_at|date:'d/m H:i' }}. Os dois calendários foram atualizados juntos.</p><p>Gravação no Google: quando aplicável, esta proposta aceita pode ser conferida pelo administrador no piloto de escrita da semana de 23–29/11. O aceite não envia alterações automaticamente à planilha.</p>
+{% elif bundle.status == 'pending' %}
+{% if problem %}<p class="notice" role="alert">{{ problem }}</p>{% else %}<p>Aguardando o aceite de {{ bundle.recipient.get_full_name|default:bundle.recipient.username }}. Nenhuma atividade foi transferida.</p>{% endif %}
+{% if can_accept %}<form method="post" action="{% url 'bundle_respond' bundle.pk 'accept' %}">{% csrf_token %}<input type="hidden" name="fingerprint" value="{{ report.fingerprint }}">{% include 'components/bundle_acknowledgement.html' %}<button class="button primary">Conferi e aceito a troca completa</button></form>{% endif %}
+{% if bundle.recipient_id == resident_user.pk %}<form method="post" action="{% url 'bundle_respond' bundle.pk 'reject' %}">{% csrf_token %}<button class="button secondary">Recusar proposta</button></form>{% else %}<form method="post" action="{% url 'bundle_respond' bundle.pk 'cancel' %}">{% csrf_token %}<button class="button secondary">Cancelar proposta</button></form>{% endif %}
+{% else %}<p>Esta proposta foi encerrada sem transferir atividades.</p>{% endif %}</section>
+{% endif %}
+{% endblock %}

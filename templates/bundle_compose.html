@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-heading"><div><div class="eyebrow">DIRETO PARA O RESIDENTE</div><h1>Trocar dia ou estágios</h1><p>Envie uma proposta privada, sem publicar no mural. O colega confere e aceita em Solicitações.</p></div><a class="button secondary" href="/?tab=requests">Minhas solicitações</a></div>
+<section class="panel bundle-panel"><h2>1. Escolha o colega e os dias</h2><p>Você pode oferecer dois estágios por um só, como PR + CC Leonardo por Pré-Operatório. O dia inteiro inclui todos os estágios definidos; plantões continuam no fluxo de troca individual.</p>
+<form method="get" action="{% url 'bundle_compose' %}"><input type="hidden" name="load" value="1"><div class="bundle-fields">{% for field in form %}<label class="field-label">{{ field.label }}{{ field }}{{ field.errors }}</label>{% endfor %}</div><button class="button secondary">Carregar atividades dos dias</button></form>
+</section>
+{% if loaded %}
+<section class="panel bundle-panel"><h2>2. Confira o que será trocado</h2>
+<form method="post" action="{% url 'bundle_prepare' %}">{% csrf_token %}
+<input type="hidden" name="recipient" value="{{ form.cleaned_data.recipient.pk }}"><input type="hidden" name="offered_day" value="{{ form.cleaned_data.offered_day|date:'Y-m-d' }}"><input type="hidden" name="requested_day" value="{{ form.cleaned_data.requested_day|date:'Y-m-d' }}"><input type="hidden" name="mode" value="{{ form.cleaned_data.mode }}">
+{% if form.cleaned_data.mode == 'day' %}<p>Serão incluídos todos os estágios abaixo. Se algum deles não deve entrar, volte e escolha “Só as atividades que eu escolher”.</p>{% else %}<p>Marque os estágios que você oferece e os que quer assumir. Os compromissos que ficarem fora serão considerados na conferência de horários.</p>{% endif %}
+<div class="bundle-columns">
+<fieldset><legend>Eu ofereço · {{ form.cleaned_data.offered_day|date:'d/m/Y' }}</legend>{% for shift in offered %}<label class="bundle-option">{% if form.cleaned_data.mode == 'selected' %}<input type="checkbox" name="offered" value="{{ shift.pk }}" {% if shift.starts_at <= now or shift.requires_reconciliation %}disabled{% endif %}>{% endif %}<span><strong>{{ shift.display_sector }}</strong><br>{{ shift.starts_at|date:'H:i' }}–{{ shift.ends_at|date:'H:i' }}{% if shift.requires_reconciliation %} · Conferir fonte{% endif %}{% if shift.starts_at <= now %} · Já iniciado{% endif %}</span></label>{% empty %}<p class="notice">Nenhum estágio definido neste dia.</p>{% endfor %}</fieldset>
+<fieldset><legend>{{ form.cleaned_data.recipient.get_full_name|default:form.cleaned_data.recipient.username }} oferece · {{ form.cleaned_data.requested_day|date:'d/m/Y' }}</legend>{% for shift in requested %}<label class="bundle-option">{% if form.cleaned_data.mode == 'selected' %}<input type="checkbox" name="requested" value="{{ shift.pk }}" {% if shift.starts_at <= now or shift.requires_reconciliation %}disabled{% endif %}>{% endif %}<span><strong>{{ shift.display_sector }}</strong><br>{{ shift.starts_at|date:'H:i' }}–{{ shift.ends_at|date:'H:i' }}{% if shift.requires_reconciliation %} · Conferir fonte{% endif %}{% if shift.starts_at <= now %} · Já iniciado{% endif %}</span></label>{% empty %}<p class="notice">Nenhum estágio definido neste dia.</p>{% endfor %}</fieldset>
+</div>
+<button class="button primary" {% if not offered or not requested %}disabled{% endif %}>Conferir horários e carga antes de propor</button>
+</form></section>
+{% endif %}
+{% endblock %}

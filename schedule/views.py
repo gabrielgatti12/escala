@@ -75,12 +75,16 @@ def dashboard(request,account_form=None):
     residents=operational_residents().filter(is_active=True).order_by('first_name','username') if tab=='week' or request.user.is_superuser else []
     exchanges=Exchange.objects.filter(Q(proposer=person)|Q(recipient=person)).select_related('offered','requested','proposer','recipient')
     allocations=Allocation.objects.filter(Q(proposer=person)|Q(recipient=person)).select_related('mine','theirs','proposer','recipient').order_by('-created_at')
+    from .models import BundleExchange
+    bundles=BundleExchange.objects.filter(Q(proposer=person)|Q(recipient=person)).select_related('proposer','recipient')
+    pending_bundles=bundles.filter(status='pending').exclude(items__shift__starts_at__lte=now).exclude(items__shift__active=False)
     pending_exchanges=exchanges.filter(status='pending',offered__starts_at__gt=now,requested__starts_at__gt=now)
     pending_allocations=allocations.filter(status='pending',mine__starts_at__gt=now,theirs__starts_at__gt=now)
     exchange_counts=pending_exchanges.aggregate(total=Count('pk'),received=Count('pk',filter=Q(recipient=person)),sent=Count('pk',filter=Q(proposer=person)))
     allocation_counts=pending_allocations.aggregate(total=Count('pk'),received=Count('pk',filter=Q(recipient=person)),sent=Count('pk',filter=Q(proposer=person)))
-    pending_count=exchange_counts['total']+allocation_counts['total']
-    received_count=exchange_counts['received']+allocation_counts['received']
+    bundle_counts=pending_bundles.aggregate(total=Count('pk'),received=Count('pk',filter=Q(recipient=person)),sent=Count('pk',filter=Q(proposer=person)))
+    pending_count=exchange_counts['total']+allocation_counts['total']+bundle_counts['total']
+    received_count=exchange_counts['received']+allocation_counts['received']+bundle_counts['received']
     allocation_options=allocation_choices(shared.filter(residents=person,starts_at__gt=now)) if tab in ['week','requests'] else []
     allocation_eligible_ids={option['activity'].pk for option in allocation_options}
     my_shared=[option['activity'] for option in allocation_options]
@@ -95,12 +99,14 @@ def dashboard(request,account_form=None):
     from .presentation import sector_rows
     box=request.GET.get('box','received')
     if box not in ['received','sent','history']:box='received'
-    displayed_exchanges=exchanges;displayed_allocations=allocations
+    displayed_exchanges=exchanges;displayed_allocations=allocations;displayed_bundles=bundles
     if tab=='requests':
         if box=='history':
+            displayed_bundles=bundles.exclude(pk__in=pending_bundles.values('pk'))
             displayed_exchanges=exchanges.exclude(pk__in=pending_exchanges.values('pk'));displayed_allocations=allocations.exclude(pk__in=pending_allocations.values('pk'))
         else:
             role='recipient' if box=='received' else 'proposer'
+            displayed_bundles=pending_bundles.filter(**{role:person})
             displayed_exchanges=pending_exchanges.filter(**{role:person})
             displayed_allocations=pending_allocations.filter(**{role:person})
     access_accounts=[];direct_accounts=[]
@@ -118,12 +124,13 @@ def dashboard(request,account_form=None):
         access_accounts=ResidentAccess.objects.select_related('account','resident').order_by('resident__first_name')
         direct_accounts=operational_residents().filter(is_active=True).exclude(password__startswith='!').order_by('first_name','username')
     return render(request,'dashboard.html',{
-        'sector_rows':sector_rows(days),'layout':'sector' if request.GET.get('layout')=='sector' else 'day','account_form':account_form,'access_accounts':access_accounts,'direct_accounts':direct_accounts,'box':box,'sent_count':exchange_counts['sent']+allocation_counts['sent'],'incoming_preview':pending_exchanges.filter(recipient=person)[:4],'tab':tab,'scope':scope,'resident_user':person,'linked':person.pk!=request.user.pk,'resident_choices':residents,'residents':residents,
+        'sector_rows':sector_rows(days),'layout':'sector' if request.GET.get('layout')=='sector' else 'day','account_form':account_form,'access_accounts':access_accounts,'direct_accounts':direct_accounts,'box':box,'sent_count':exchange_counts['sent']+allocation_counts['sent']+bundle_counts['sent'],'incoming_preview':pending_exchanges.filter(recipient=person)[:4],'tab':tab,'scope':scope,'resident_user':person,'linked':person.pk!=request.user.pk,'resident_choices':residents,'residents':residents,
         'days':days,'week_start':week_start,'week_last':week_next-timedelta(days=1),'week_previous':week_start-timedelta(days=7),'week_next':week_next,'today':today,'now':now,
         'own_week_count':own_week_count,'own_shared_count':own_shared_count,'pending_count':pending_count,'received_count':received_count,
         'future_count':has_future,'has_offered':exchangeable.filter(resident=person).exists() if tab in ['week','requests'] else False,'has_requested':exchangeable.exclude(resident=person).exists() if tab in ['week','requests'] else False,
         'offered':[],'requested':[],'bounds':bounds,
         'exchanges':displayed_exchanges[:100],'recent_exchanges':exchanges[:4],'allocations':displayed_allocations[:100],'my_shared':my_shared,'allocation_options':allocation_options,'allocation_eligible_ids':allocation_eligible_ids,
+        'bundles':displayed_bundles[:100] if tab=='requests' else [],'incoming_bundles':pending_bundles.filter(recipient=person)[:4],
         'latest_sync':SyncState.objects.filter(last_success__isnull=False).order_by('-last_success').first(),'source_cards':source_cards,'drive_folders':DriveFolder.objects.all() if request.user.is_superuser else [],'sync_health':sync_health_status,
     })
 @login_required

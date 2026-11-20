@@ -2,6 +2,7 @@
 from datetime import date, datetime, time, timedelta
 import re
 
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.db.models import CharField, Q, Value
 from django.db.models.functions import Concat, Lower, Replace
@@ -76,21 +77,47 @@ def _option(shift, include_resident):
         label += f' · {shift.get_category_display()} {shift.resident_group}'
     if include_resident:
         label = f'{shift.resident.get_full_name() or shift.resident.username} · {label}'
-    return {'id': str(shift.pk), 'label': label, 'category': shift.category, 'group': shift.resident_group}
+    return {'id': str(shift.pk), 'label': label, 'category': shift.category, 'group': shift.resident_group,
+            'resident_id': str(shift.resident_id),
+            'resident_name': shift.resident.get_full_name() or shift.resident.username}
 
 
 @login_required
 @require_GET
 def choices(request):
     side = request.GET.get('side', '')
-    if side not in ['offered', 'requested']:
+    if side not in ['offered', 'requested', 'residents']:
         return JsonResponse({'error': 'Selecione o lado da troca.'}, status=400)
     person = resident_for_account(request.user)
     eligible = Shift.objects.filter(
         active=True, resident__is_active=True, starts_at__gt=timezone.now(), requires_reconciliation=False,
     ).filter(Q(category='regular') | Q(category__in=ON_CALL_CATEGORIES, resident_group__in=['R1', 'R2', 'R3']))
+    if side == 'residents':
+        resident_ids = eligible.exclude(resident=person).order_by().values('resident_id')
+        people = get_user_model().objects.filter(is_active=True, pk__in=resident_ids).exclude(pk=person.pk)
+        selected_id = _identifier(request.GET.get('selected', ''))
+        selected = people.filter(pk=selected_id).first() if selected_id else None
+        import unicodedata
+        words = request.GET.get('q','')[:150].strip().split()[:8]
+        searched = people
+        for word in words:
+            word = ''.join(c for c in unicodedata.normalize('NFKD',word) if not unicodedata.combining(c)).casefold()
+            searched = searched.alias(search_name=_fold(Concat('first_name',Value(' '),'last_name',Value(' '),'username',output_field=CharField()))).filter(search_name__contains=word)
+        rows = list(searched.order_by('first_name','last_name','username','pk')[:101])
+        has_more = len(rows)>100
+        rows = rows[:100]
+        if selected and not any(person.pk==selected.pk for person in rows):
+            if len(rows)==100:rows.pop();has_more=True
+            rows.insert(0,selected)
+        response = JsonResponse({'options':[{'id':str(person.pk),'label':person.get_full_name() or person.username} for person in rows],
+                                 'selected':str(selected.pk) if selected else '', 'has_more':has_more,'limit':100})
+        response['Cache-Control']='private, no-store'
+        return response
+    recipient_id = _identifier(request.GET.get('recipient',''))
     own = side == 'offered'
     query = eligible.filter(resident=person) if own else eligible.exclude(resident=person)
+    if not own and recipient_id:
+        query = query.filter(resident_id=recipient_id)
     anchor_id = _identifier(request.GET.get('anchor', ''))
     selected_id = _identifier(request.GET.get('selected', ''))
     if anchor_id:

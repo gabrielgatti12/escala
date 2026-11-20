@@ -13,6 +13,7 @@ REQUEST_LINK = '/?tab=requests&box=received'
 
 
 def _request_type(proposal):
+    if proposal._meta.model_name=='bundleexchange':return 'bundle'
     return 'exchange' if isinstance(proposal, Exchange) else 'allocation'
 
 
@@ -28,7 +29,10 @@ def _is_pending_valid(proposal, now):
     # Reuse the same ownership, timing and overlap rules as confirmation.
     from .services import validate_allocation, validate_pair
     try:
-        if isinstance(proposal, Exchange):
+        if _request_type(proposal)=='bundle':
+            from .bundle_exchanges import review_pending_bundle
+            review_pending_bundle(proposal,now=now)
+        elif isinstance(proposal, Exchange):
             validate_pair(proposal.offered, proposal.requested, proposal.proposer, proposal.recipient, now=now)
         else:
             recipient_id = validate_allocation(proposal.proposer, proposal.mine, proposal.theirs, now=now)
@@ -53,6 +57,11 @@ def _payload(proposal, now):
 
 def _message(proposal):
     proposer = proposal.proposer.get_full_name() or proposal.proposer.username
+    if _request_type(proposal)=='bundle':
+        snapshot=proposal.snapshot
+        return (f'{proposer} propôs uma troca direta de atividades: '
+                f'{len(snapshot.get("offered",[]))} atividade(s) por {len(snapshot.get("requested",[]))} atividade(s). '
+                'Confira as atividades, os horários e a carga horária das duas pessoas antes de aceitar ou recusar.')
     if isinstance(proposal, Exchange):
         offered = proposal.offered
         requested = proposal.requested
@@ -79,6 +88,12 @@ def notify_request_created(proposal, now=None):
     return _request_notice(proposal, now)
 
 
+def _request_link(proposal):
+    if _request_type(proposal)=='bundle':
+        return f'/trocas/combinadas/{proposal.pk}/'
+    return REQUEST_LINK
+
+
 def _request_notice(proposal, now):
     key, _ = _keys(proposal)
     return Notification.objects.get_or_create(
@@ -86,10 +101,10 @@ def _request_notice(proposal, now):
         defaults={
             'resident_id': proposal.recipient_id,
             'kind': 'request',
-            'title': 'Nova solicitação de troca' if isinstance(proposal, Exchange) else 'Nova proposta de divisão',
+            'title': 'Nova proposta direta de troca' if _request_type(proposal)=='bundle' else 'Nova solicitação de troca' if isinstance(proposal, Exchange) else 'Nova proposta de divisão',
             'message': _message(proposal),
             'payload': _payload(proposal, now),
-            'link': REQUEST_LINK,
+            'link': _request_link(proposal),
         },
     )
 
@@ -133,9 +148,15 @@ def refresh_request_notifications(now=None):
     valid_keys = set()
     exchanges = Exchange.objects.filter(status='pending', offered__starts_at__gt=now, requested__starts_at__gt=now).select_related('proposer', 'recipient', 'offered', 'requested')
     allocations = Allocation.objects.filter(status='pending', mine__starts_at__gt=now, theirs__starts_at__gt=now).select_related('proposer', 'recipient', 'mine', 'theirs').prefetch_related('mine__residents', 'theirs__residents')
-    for proposals in [exchanges, allocations]:
+    from .models import BundleExchange
+    bundles=BundleExchange.objects.filter(status='pending').select_related('proposer','recipient').prefetch_related('items__shift')
+    for proposals in [exchanges, allocations, bundles]:
         for proposal in proposals:
             if not _is_pending_valid(proposal, now):
+                if _request_type(proposal)=='bundle':
+                    proposal.status='cancelled';proposal.resolved_at=now
+                    proposal.save(update_fields=['status','resolved_at'])
+                    counts['closed']+=close_request_notifications(proposal,now=now)
                 continue
             initial_key, reminder_key = _keys(proposal)
             valid_keys.update([initial_key, reminder_key])
@@ -166,7 +187,7 @@ def refresh_request_notifications(now=None):
                         'title': 'Solicitação aguardando sua resposta',
                         'message': _message(proposal),
                         'payload': {**_payload(proposal, now), 'last_reminded_at': now.isoformat()},
-                        'link': REQUEST_LINK,
+                        'link': _request_link(proposal),
                     },
                 )
                 if not reminder_created:
@@ -176,7 +197,7 @@ def refresh_request_notifications(now=None):
     # appearing as unread prompts even if no response view was used.
     stale = Notification.objects.filter(kind__in=['request', 'reminder']).exclude(dedup_key__in=valid_keys).exclude(payload__status__in=['closed', 'accepted', 'rejected', 'cancelled'])
     for notice in stale:
-        if not notice.dedup_key or not notice.dedup_key.startswith(('request:exchange:', 'request:allocation:', 'reminder:exchange:', 'reminder:allocation:')):
+        if not notice.dedup_key or not notice.dedup_key.startswith(('request:exchange:', 'request:allocation:', 'reminder:exchange:', 'reminder:allocation:', 'request:bundle:', 'reminder:bundle:')):
             continue
         notice.payload = {**notice.payload, 'status': 'closed'}
         fields = ['payload']

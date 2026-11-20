@@ -15,6 +15,8 @@ def data_revision(resident=None):
         'sources':list(SheetSource.objects.order_by('pk').values_list('pk','name','enabled','error')),
         'sync_cycle':list(SyncHeartbeat.objects.values_list('started_at','finished_at')),
     }
+    from .models import BundleExchange
+    values['bundles']=BundleExchange.objects.aggregate(created=Max('created_at'),resolved=Max('resolved_at'),total=Count('pk'))
     if resident is not None:
         values['notifications']=Notification.objects.filter(resident=resident).aggregate(total=Count('pk'),latest=Max('created_at'),read=Max('read_at'),unread=Count('pk',filter=Q(read_at__isnull=True)))
     return hashlib.sha256(json.dumps(values,sort_keys=True,default=str).encode()).hexdigest()

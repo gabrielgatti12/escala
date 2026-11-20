@@ -75,6 +75,8 @@ def respond_exchange(user, pk, action):
             requested.save(update_fields=['resident','wants_exchange'])
             ExchangeTopic.objects.filter(shift_id__in=shifts,closed_at__isnull=True).update(closed_at=timezone.now())
             Exchange.objects.filter(status='pending').exclude(pk=pk).filter(Q(offered_id__in=shifts)|Q(requested_id__in=shifts)).update(status='cancelled',resolved_at=timezone.now())
+            from .bundle_integrations import cancel_pending_bundles
+            cancel_pending_bundles(shifts.keys())
         exchange.status = 'accepted' if action == 'accept' else 'rejected'
     else:
         raise ValidationError('Você não pode realizar esta ação.')
@@ -92,7 +94,10 @@ def expire_pending_requests(now=None):
     exchanges=Exchange.objects.filter(status='pending').filter(Q(offered__starts_at__lte=now)|Q(requested__starts_at__lte=now))
     allocations=Allocation.objects.filter(status='pending').filter(Q(mine__starts_at__lte=now)|Q(theirs__starts_at__lte=now))
     # Avoid acquiring a SQLite write lock on every cycle when nothing expired.
+    from .bundle_integrations import expire_pending_bundles
+    bundle_count=expire_pending_bundles(now=now)
     return {
+        'bundles':bundle_count,
         'exchanges':exchanges.update(status='cancelled',resolved_at=now) if exchanges.exists() else 0,
         'allocations':allocations.update(status='cancelled',resolved_at=now) if allocations.exists() else 0,
     }

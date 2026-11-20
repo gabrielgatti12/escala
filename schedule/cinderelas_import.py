@@ -68,7 +68,8 @@ def sync_monthly_roster(book,source_id,*,full):
     cleanup_tabs = valid_tabs | {tab for tab in old_tabs if month_key(tab) in valid_months}
     for tab in sorted(absent_tabs):
         warnings.append(f'{tab}: aba ausente; dados anteriores preservados para conferência.')
-    accepted_ids = set()
+    from .bundle_integrations import accepted_bundle_shift_ids,cancel_pending_bundles
+    accepted_ids = accepted_bundle_shift_ids(source_id)
     for offered_id, requested_id in Exchange.objects.filter(status='accepted').filter(Q(offered__source=source_id) | Q(requested__source=source_id)).values_list('offered_id', 'requested_id'):
         accepted_ids.update([offered_id, requested_id])
     seen = []
@@ -143,6 +144,7 @@ def sync_monthly_roster(book,source_id,*,full):
         held.update(requires_reconciliation=True)
     if affected:
         Exchange.objects.filter(status='pending').filter(Q(offered_id__in=affected) | Q(requested_id__in=affected)).update(status='cancelled', resolved_at=now)
+        cancel_pending_bundles(affected,now=now)
     reconciliation = Shift.objects.filter(source=source_id, active=True, requires_reconciliation=True).count()
     if valid_tabs:
         state.last_success = now

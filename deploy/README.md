@@ -1,5 +1,26 @@
 # Implantação na instância Oracle
 
+## Atualização: troca direta de dia e conjunto de estágios
+
+As migrações **0019 e 0020** adicionam propostas privadas de conjuntos (como PR + CC por Pré-Operatório) e sua prévia no piloto Google. A conexão OAuth e os arquivos privados já instalados continuam em uso; não é necessário criar outro cliente Google. Atualize o código e o banco antes de abrir as telas novas:
+
+```bash
+cd /opt/escala-app &&
+git pull --ff-only origin codex/escala-inicial &&
+bash scripts/oracle-compose.sh build &&
+bash scripts/oracle-compose.sh stop web sync &&
+bash scripts/oracle-compose.sh run --rm web python manage.py migrate --noinput &&
+bash scripts/oracle-compose.sh up -d
+```
+
+Se a migração falhar, mantenha os serviços parados até resolver o erro; preserve o volume e os arquivos de credenciais. O wrapper mantém os complementos de OAuth e Drive. Atualize a página para carregar o JavaScript novo.
+
+No aplicativo, escolha **Propor diretamente ao residente**, selecione colega/dias e carregue as atividades. Use Dia inteiro de estágios ou escolha os estágios específicos; confira horários, totais e ressalvas, marque os aceites e envie. O destinatário abre **Solicitações → Revisar horários e responder**, confere os mesmos termos e marca seu aceite. A proposta não cria publicação no mural. Plantões mantêm o fluxo de troca individual, agora com filtro explícito do destinatário.
+
+No exemplo PR + CC Leonardo ↔ Pré-Operatório, as durações são 10h15 ↔ 9h20. Os avisos mostram os horários e a diferença de 55 minutos. Sobreposição ou diferença de carga exige ciência de ambos; os horários de origem não são alterados nem há validação de limites legais ou deslocamento real. Mudanças de escala após o envio invalidam o aceite e pedem nova conferência pelos dois.
+
+Para conferir no Google uma troca de conjunto aceita, o mesmo administrador que conectou o editor abre a tela de teste da semana 23–29/11/2026 e prepara a prévia do conjunto. Todos os nomes são enviados em um único lote, após confirmação. Os nomes são valores fixos no Espelho Semanal e podem substituir fórmulas dessas células. Nenhuma escrita Google real é feita pelos testes locais. O período/fonte, proteção contra edições e restrições do piloto permanecem; a leitura prévia e a gravação não são uma operação condicional atômica da API.
+
 ## Atualização de 12/11/2026: navegação do calendário
 
 Esta atualização requer a migração **0017**, que cria índices para a navegação. A janela de troca passa a consultar opções sob demanda no servidor e os títulos do calendário exportado usam atividade antes do local.

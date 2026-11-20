@@ -43,7 +43,7 @@ class ExchangeChoiceTests(TestCase):
         other = self.options(side='requested')
         self.assertEqual([i['id'] for i in own.json()['options']], [str(self.mine.pk)])
         self.assertEqual([i['id'] for i in other.json()['options']], [str(self.theirs.pk)])
-        self.assertEqual(set(other.json()['options'][0]), {'id', 'label', 'category', 'group'})
+        self.assertEqual(set(other.json()['options'][0]), {'id', 'label', 'category', 'group', 'resident_id', 'resident_name'})
         self.assertIn('Refração · HOSPITAL', own.json()['options'][0]['label'])
         self.assertIn('no-store', own['Cache-Control'])
 
@@ -120,3 +120,41 @@ class ExchangeChoiceTests(TestCase):
         self.assertIn('<script>',payload['options'][0]['label'])
         self.theirs.refresh_from_db()
         self.assertEqual(self.theirs.sector,'HOSPITAL · <script>alert(1)</script>')
+
+
+    def test_requested_can_be_addressed_to_exact_resident_without_changing_ownership(self):
+        third=self.shift('another-recipient',self.third)
+        payload=self.options(side='requested',recipient=self.other.pk).json()
+        self.assertEqual([item['id'] for item in payload['options']],[str(self.theirs.pk)])
+        self.assertEqual(payload['options'][0]['resident_id'],str(self.other.pk))
+        self.assertEqual(payload['options'][0]['resident_name'],'José Ávila')
+        self.assertEqual(self.options(side='requested',recipient=self.me.pk).json()['options'],[])
+        self.assertEqual(self.options(side='requested',recipient='999999999999999999999').status_code,404)
+        # A selected card from someone else cannot bypass the explicit filter.
+        payload=self.options(side='requested',recipient=self.other.pk,selected=third.pk).json()
+        self.assertEqual(payload['selected'],'')
+        self.assertNotIn(str(third.pk),[item['id'] for item in payload['options']])
+        self.theirs.refresh_from_db();self.assertEqual(self.theirs.resident_id,self.other.pk)
+
+    def test_resident_choices_are_scoped_searchable_and_do_not_include_ineligible_owners(self):
+        self.shift('third-person-choice',self.third)
+        disabled=get_user_model().objects.create_user('disabled-recipient',is_active=False)
+        self.shift('disabled-choice',disabled)
+        response=self.options(side='residents')
+        self.assertIn('no-store',response['Cache-Control'])
+        payload=response.json()
+        self.assertEqual({item['id'] for item in payload['options']},{str(self.other.pk),str(self.third.pk)})
+        self.assertEqual(set(payload['options'][0]),{'id','label'})
+        self.assertEqual([item['id'] for item in self.options(side='residents',q='jose avila').json()['options']],[str(self.other.pk)])
+        self.assertEqual(self.options(side='residents',selected=self.me.pk).json()['selected'],'')
+
+    def test_resident_choices_limit_and_selected_outside_first_page(self):
+        users=get_user_model()
+        people=users.objects.bulk_create([users(username=f'many-recipient-{i}',first_name=f'A {i:03d}') for i in range(105)])
+        Shift.objects.bulk_create([Shift(external_id=f'many-recipient-shift-{p.pk}',resident=p,starts_at=self.start,ends_at=self.start+timedelta(hours=4),sector='Rotina') for p in people])
+        payload=self.options(side='residents').json()
+        self.assertEqual(len(payload['options']),100)
+        self.assertTrue(payload['has_more'])
+        payload=self.options(side='residents',selected=self.other.pk,q='not matching').json()
+        self.assertEqual(payload['selected'],str(self.other.pk))
+        self.assertEqual(payload['options'],[{'id':str(self.other.pk),'label':'José Ávila'}])

@@ -139,19 +139,21 @@ def sync_workbook(book, source):
         raise SheetFormatError('Datas não reconhecidas; nada foi alterado.')
     validate_weekly_input(book,rows,days)
     from collections import defaultdict
+    from .bundle_integrations import accepted_bundle_shift_ids,bundle_former_owners,cancel_pending_bundles
+    bundle_ids=accepted_bundle_shift_ids(source)
     accepted_slots=defaultdict(list)
     accepted_source_ids=set()
-    for decision in Shift.objects.filter(source=source).filter(Q(offers__status='accepted')|Q(requests__status='accepted')).distinct():
+    for decision in Shift.objects.filter(source=source).filter(Q(offers__status='accepted')|Q(requests__status='accepted')|Q(pk__in=bundle_ids)).distinct():
         accepted_source_ids.add(decision.pk)
         if decision.active:
             accepted_slots[(decision.source_cell,decision.starts_at,decision.ends_at,decision.sector)].append(decision)
-    former_owners=defaultdict(set)
+    former_owners=bundle_former_owners(source)
     for offered_id,requested_id,proposer_id,recipient_id in Exchange.objects.filter(status='accepted').filter(
         Q(offered_id__in=accepted_source_ids)|Q(requested_id__in=accepted_source_ids)
     ).values_list('offered_id','requested_id','proposer_id','recipient_id'):
         former_owners[offered_id].add(proposer_id)
         former_owners[requested_id].add(recipient_id)
-    seen=[]; shared_seen=[]; incomplete_seen=[]; rest_count=0; occurrences={}; preserved=0
+    seen=[]; shared_seen=[]; incomplete_seen=[]; rest_count=0; occurrences={}; preserved=0; conflict_ids=set()
     for col,day in days:
         sector=''; location=''
         for row_number,row in enumerate(rows[2:],3):
@@ -211,6 +213,17 @@ def sync_workbook(book, source):
                     # A cached/old source may still contain a former owner,
                     # including after a previous read acknowledged the swap.
                     seen.append(decision.external_id)
+                    if decision.requires_reconciliation:
+                        decision.requires_reconciliation=False;decision.save(update_fields=['requires_reconciliation'])
+                    preserved+=1
+                    continue
+                if decision and user.pk!=decision.resident_id:
+                    # A third owner at the same reviewed slot is a conflict,
+                    # not permission to add a duplicate assignment beside it.
+                    decision.requires_reconciliation=True;decision.wants_exchange=False
+                    decision.save(update_fields=['requires_reconciliation','wants_exchange'])
+                    conflict_ids.add(decision.pk)
+                    seen.append(decision.external_id)
                     preserved+=1
                     continue
                 seen.append(ext)
@@ -223,6 +236,9 @@ def sync_workbook(book, source):
                         shift.external_id=ext
                         shift.save(update_fields=['external_id'])
                 if shift and shift.pk in accepted_source_ids:
+                    shift.source_cell=source_cell
+                    shift.requires_reconciliation=False
+                    shift.save(update_fields=['source_cell','requires_reconciliation'])
                     preserved+=1
                     continue
                 Shift.objects.update_or_create(external_id=ext,defaults={'source':source,'active':True,'source_cell':source_cell,'resident':user,'starts_at':start,'ends_at':end,'sector':label})
@@ -234,19 +250,27 @@ def sync_workbook(book, source):
     assigned_obsolete=SharedActivity.objects.filter(source=source,allocated_to__isnull=False).exclude(external_id__in=shared_seen).count()
     obsolete=Shift.objects.filter(source=source).exclude(external_id__in=seen)
     protected=list(Exchange.objects.filter(status='accepted').values_list('offered_id','requested_id'))
-    protected_ids={pk for pair in protected for pk in pair}
+    protected_ids={pk for pair in protected for pk in pair}|bundle_ids
     # Accepted exchanges remain available for manual reconciliation when their source changes.
-    retained=obsolete.filter(pk__in=protected_ids).count()
+    held=obsolete.filter(pk__in=protected_ids)
+    retained=held.count()
+    conflict_ids.update(held.values_list('pk',flat=True))
+    held.update(requires_reconciliation=True,wants_exchange=False)
     removed=list(obsolete.exclude(pk__in=protected_ids).values_list('pk',flat=True))
     obsolete.exclude(pk__in=protected_ids).update(active=False)
     Exchange.objects.filter(status='pending').filter(Q(offered_id__in=removed)|Q(requested_id__in=removed)).update(status='cancelled',resolved_at=timezone.now())
+    cancel_pending_bundles(set(removed)|conflict_ids,now=timezone.now())
+    if conflict_ids:
+        from .models import ExchangeTopic
+        ExchangeTopic.objects.filter(shift_id__in=conflict_ids,closed_at__isnull=True).update(closed_at=timezone.now())
     IncompleteActivity.objects.filter(source=source).exclude(external_id__in=incomplete_seen).delete()
     # The weekly mirror is authoritative. Do not fabricate daily assignments
     # by expanding reference rotations over their entire date ranges.
     RotationActivity.objects.filter(source=source).delete()
     state.last_success=timezone.now()
     pending=SharedActivity.objects.filter(source=source,active=True,allocated_to__isnull=True).count()
-    state.summary=f'{len(seen)} plantões definidos; {pending} alocações pendentes; {len(incomplete_seen)-rest_count} sem horário válido; {rest_count} registros de pós-plantão; {preserved+retained} trocas preservadas; {retained+assigned_obsolete} exigem conciliação.'
+    reconciliation=Shift.objects.filter(source=source,active=True,requires_reconciliation=True).count()+assigned_obsolete
+    state.summary=f'{len(seen)} plantões definidos; {pending} alocações pendentes; {len(incomplete_seen)-rest_count} sem horário válido; {rest_count} registros de pós-plantão; {preserved+retained} trocas preservadas; {reconciliation} exigem conciliação.'
     state.save()
     if previous_success:
         notify_schedule_changes(source,before,snapshot_source(source,now=snapshot_time),previous_success=previous_success)

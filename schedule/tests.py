@@ -314,7 +314,7 @@ class WorkflowTests(TestCase):
         response=self.client.get('/')
         day=timezone.localtime(self.s1.starts_at).date()
         self.assertEqual(response.context['week_start'],day-timedelta(days=day.weekday()))
-        self.assertContains(response,'Solicitar troca')
+        self.assertContains(response,'Propor diretamente ao residente')
     def test_week_selection_is_preserved_explicitly(self):
         self.client.force_login(self.a)
         response=self.client.get('/',{'week':'2026-09-28'})

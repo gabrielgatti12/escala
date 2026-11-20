@@ -125,7 +125,7 @@ class PendingRequestExpirationTests(TestCase):
             mine=self.mine, theirs=self.theirs, proposer=self.a,
             recipient=self.b, status='rejected', resolved_at=self.now - timedelta(days=1),
         )
-        self.assertEqual(expire_pending_requests(self.now), {'exchanges':1, 'allocations':1})
+        self.assertEqual(expire_pending_requests(self.now), {'exchanges':1, 'allocations':1, 'bundles':0})
         for proposal in [self.exchange, self.allocation]:
             proposal.refresh_from_db()
             self.assertEqual(proposal.status, 'cancelled')
@@ -134,10 +134,10 @@ class PendingRequestExpirationTests(TestCase):
         self.assertEqual((accepted.status, rejected.status), ('accepted', 'rejected'))
         self.assertEqual(Shift.objects.count(), 2)
         self.assertFalse(SharedActivity.objects.filter(allocated_to__isnull=False).exists())
-        self.assertEqual(expire_pending_requests(self.now), {'exchanges':0, 'allocations':0})
+        self.assertEqual(expire_pending_requests(self.now), {'exchanges':0, 'allocations':0, 'bundles':0})
 
     def test_future_requests_do_not_expire(self):
-        self.assertEqual(expire_pending_requests(self.now), {'exchanges':0, 'allocations':0})
+        self.assertEqual(expire_pending_requests(self.now), {'exchanges':0, 'allocations':0, 'bundles':0})
         self.exchange.refresh_from_db(); self.allocation.refresh_from_db()
         self.assertEqual((self.exchange.status, self.allocation.status), ('pending', 'pending'))
         self.assertFalse(self.exchange.is_expired)

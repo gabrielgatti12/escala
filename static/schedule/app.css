@@ -44,3 +44,24 @@ input,select{width:100%;border:1px solid #dfe6e1;background:#fff;color:#345248;b
 .sheets-editor-panel .checkbox{white-space:normal;align-items:flex-start;line-height:1.6;margin:14px 0}
 .sheets-editor-panel .checkbox input{flex-shrink:0;margin-top:3px}
 .sheets-editor-panel .button{max-width:100%;white-space:normal}
+
+/* Reviewed, private exchanges of a day or selected stages. */
+.bundle-panel{padding:22px;margin-bottom:20px;overflow-wrap:anywhere}
+.bundle-panel h2{font-size:16px;margin:0 0 14px}
+.bundle-panel p{line-height:1.65;margin:8px 0}
+.bundle-fields,.bundle-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin:15px 0 22px}
+.bundle-columns fieldset{border:1px solid #dfe6e1;border-radius:10px;padding:16px;min-width:0}
+.bundle-columns legend{font-weight:600;padding:0 5px;font-size:12px}
+.bundle-option{display:flex;gap:10px;align-items:flex-start;line-height:1.6;padding:10px 0;cursor:pointer}
+.bundle-option input{width:auto;flex-shrink:0;margin-top:4px}
+.bundle-activity{padding:12px 0;border-bottom:1px solid #e7ece9}
+.bundle-activity p{font-size:12px;color:#617c6e}
+.bundle-total{font-weight:600;font-size:12px}
+.bundle-warnings{border:1px solid #efd39b;background:#fff9ed;border-radius:10px;padding:18px;margin-top:20px}
+.bundle-warnings p{padding:10px 0;border-bottom:1px solid #f0e1c4;font-size:12px}
+.bundle-warnings .bundle-overlap{font-weight:600;color:#8a4e22}
+.bundle-consent{white-space:normal!important;align-items:flex-start!important;line-height:1.7;margin:18px 0}
+.bundle-consent input{flex-shrink:0;margin-top:5px}
+.bundle-panel .button{max-width:100%;white-space:normal;margin:5px 0}
+.heading-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:800px){.bundle-fields,.bundle-columns{grid-template-columns:1fr;gap:14px}.bundle-panel{padding:17px}.heading-actions{justify-content:flex-start}.bundle-consent{font-size:12px}}

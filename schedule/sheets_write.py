@@ -30,22 +30,84 @@ def pilot_sources():
     return SheetSource.objects.filter(enabled=True,format='weekly',spreadsheet_id__in=ids).order_by('name')
 
 
+def _is_bundle(exchange):
+    from .models import BundleExchange
+    return isinstance(exchange,BundleExchange)
+
+
+def _entries(exchange):
+    if not _is_bundle(exchange):
+        return [(exchange.offered,exchange.proposer,exchange.recipient,'offered'),
+                (exchange.requested,exchange.recipient,exchange.proposer,'requested')]
+    items=list(exchange.items.select_related('shift__resident','original_owner').order_by('side','shift__starts_at','pk'))
+    if not items or len(items)>40 or not any(item.side=='offered' for item in items) or not any(item.side=='requested' for item in items):
+        raise EditorError('O conjunto precisa ter atividades válidas nos dois lados.')
+    result=[]
+    for item in items:
+        if item.side not in ['offered','requested']:raise EditorError('Um lado do conjunto não é válido.')
+        old_owner,new_owner=(exchange.proposer,exchange.recipient) if item.side=='offered' else (exchange.recipient,exchange.proposer)
+        if item.original_owner_id!=old_owner.pk:raise EditorError('A titularidade original do conjunto mudou.')
+        result.append((item.shift,old_owner,new_owner,item.side))
+    if len({entry[0].pk for entry in result})!=len(result):raise EditorError('Há atividades duplicadas no conjunto.')
+    return result
+
+
+def _bundle_snapshot(exchange,entries):
+    from django.utils.dateparse import parse_datetime
+    if not exchange.proposer_acknowledged_at or not exchange.recipient_acknowledged_at or not exchange.resolved_at:
+        raise EditorError('O conjunto precisa registrar o aceite explícito dos dois residentes.')
+    snapshot=exchange.snapshot
+    if not isinstance(snapshot,dict) or not isinstance(snapshot.get('terms'),dict):
+        raise EditorError('O conjunto não tem uma conferência válida dos termos.')
+    if (snapshot['terms'].get('proposer_id')!=exchange.proposer_id or snapshot['terms'].get('recipient_id')!=exchange.recipient_id or snapshot['terms'].get('mode')!=exchange.mode):
+        raise EditorError('Os participantes ou o modo do conjunto mudaram desde o aceite.')
+    signature=hashlib.sha256(json.dumps(snapshot['terms'],sort_keys=True,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
+    if signature!=exchange.fingerprint or snapshot.get('fingerprint')!=exchange.fingerprint:
+        raise EditorError('A conferência do conjunto foi alterada; revise os termos antes de gravar.')
+    records=[]
+    for side in ['offered','requested']:
+        for record in snapshot['terms'].get(side,[]):
+            if not isinstance(record,dict):raise EditorError('O conjunto contém termos inválidos.')
+            records.append((side,record))
+    if len(records)!=len(entries):raise EditorError('As atividades do conjunto mudaram desde o aceite.')
+    by_id={(side,record.get('id')):record for side,record in records}
+    if len(by_id)!=len(records):raise EditorError('Há atividades duplicadas na conferência do conjunto.')
+    for shift,old_owner,new_owner,side in entries:
+        record=by_id.get((side,shift.pk))
+        if not record or record.get('resident_id')!=old_owner.pk:
+            raise EditorError('As atividades do conjunto mudaram desde o aceite.')
+        for field in ['sector','source','source_tab','source_cell','category']:
+            if record.get(field)!=getattr(shift,field):raise EditorError('A atividade foi alterada depois do aceite do conjunto.')
+        try:
+            same=(parse_datetime(record['starts_at'])==shift.starts_at and parse_datetime(record['ends_at'])==shift.ends_at)
+        except (KeyError,TypeError,ValueError):same=False
+        if not same:raise EditorError('O horário foi alterado depois do aceite do conjunto.')
+
+
 def _eligible(exchange,account):
+    from .models import BundleExchangeItem
     pilot=SheetsWritePilot.objects.select_related('source').filter(key='pilot',enabled=True).first()
     if not pilot or not pilot.source.enabled or pilot.source.format!='weekly':
         raise EditorError('Selecione a fonte semanal e habilite o teste de 23–29/11/2026.')
     if exchange.status!='accepted':raise EditorError('A troca precisa ter sido aceita pelos dois residentes.')
-    offered,requested=exchange.offered,exchange.requested
+    entries=_entries(exchange)
     if (exchange.proposer.get_full_name() or exchange.proposer.username).casefold()==(exchange.recipient.get_full_name() or exchange.recipient.username).casefold():
         raise EditorError('Os nomes dos residentes são ambíguos para este teste.')
-    for shift in [offered,requested]:
+    for shift,old_owner,new_owner,side in entries:
         if (not shift.active or shift.requires_reconciliation or shift.category!='regular' or
                 shift.source!=pilot.source.spreadsheet_id or shift.source_tab!=TAB or
                 not WEEK<=timezone.localdate(shift.starts_at)<=LAST or shift.starts_at<=timezone.now()):
             raise EditorError('Este teste aceita apenas atividades futuras da mesma fonte semanal de 23–29/11/2026, sem conciliação.')
-    if offered.pk==requested.pk or offered.resident_id!=exchange.recipient_id or requested.resident_id!=exchange.proposer_id:
-        raise EditorError('A titularidade da troca mudou; confira a escala antes de gravar.')
-    if Exchange.objects.filter(status='accepted').exclude(pk=exchange.pk).filter(Q(offered_id__in=[offered.pk,requested.pk])|Q(requested_id__in=[offered.pk,requested.pk])).exists():
+        if shift.resident_id!=new_owner.pk:raise EditorError('A titularidade da troca mudou; confira a escala antes de gravar.')
+    ids=[entry[0].pk for entry in entries]
+    bundles=BundleExchangeItem.objects.filter(exchange__status='accepted',shift_id__in=ids)
+    singles=Exchange.objects.filter(status='accepted').filter(Q(offered_id__in=ids)|Q(requested_id__in=ids))
+    if _is_bundle(exchange):
+        _bundle_snapshot(exchange,entries)
+        bundles=bundles.exclude(exchange=exchange)
+    else:
+        singles=singles.exclude(pk=exchange.pk)
+    if bundles.exists() or singles.exists():
         raise EditorError('Atividades com mais de uma troca aceita precisam de conferência; não entram neste teste inicial.')
     if not exchange.proposer.is_active or not exchange.recipient.is_active:
         raise EditorError('Um dos residentes está desativado.')
@@ -144,27 +206,38 @@ def _slot(sheet,cells,shift,old_owner,new_owner):
 
 
 def _app_state(exchange):
-    return [{'id':shift.pk,'owner':shift.resident_id,'source':shift.source,'tab':shift.source_tab,
-             'cell':shift.source_cell,'start':shift.starts_at.isoformat(),'end':shift.ends_at.isoformat(),
-             'sector':shift.sector} for shift in [exchange.offered,exchange.requested]]
+    rows=[{'id':shift.pk,'owner':shift.resident_id,'original_owner':old_owner.pk,'side':side,
+           'source':shift.source,'tab':shift.source_tab,'cell':shift.source_cell,
+           'start':shift.starts_at.isoformat(),'end':shift.ends_at.isoformat(),'sector':shift.sector}
+          for shift,old_owner,new_owner,side in _entries(exchange)]
+    return rows
 
 
 def make_plan(exchange,session,account):
     source,connection=_eligible(exchange,account)
     sheet,cells=_read_book(session,source)
-    first=_slot(sheet,cells,exchange.offered,exchange.proposer,exchange.recipient)
-    second=_slot(sheet,cells,exchange.requested,exchange.recipient,exchange.proposer)
-    if first['state']!=second['state']:raise EditorError('Só uma atividade já reflete a troca. Confira a divergência antes de continuar.')
+    entries=_entries(exchange)
+    slots=[(_slot(sheet,cells,shift,old_owner,new_owner),old_owner,new_owner,side)
+           for shift,old_owner,new_owner,side in entries]
+    states={item['state'] for item,_,_,_ in slots}
+    if len(states)!=1:raise EditorError('Só uma atividade ou parte do conjunto já reflete a troca. Confira a divergência antes de continuar.')
+    already=states=={'final'}
+    canonical={}
+    if not already:
+        for item,old_owner,_,_ in slots:
+            canonical.setdefault(old_owner.pk,item['name'])
     result={'spreadsheet_id':source.spreadsheet_id,'sheet_id':sheet['properties']['sheetId'],
-            'exchange':exchange.pk,'connection':connection.connected_at.isoformat(),'email':connection.email,
-            'already_applied':first['state']=='final','cells':[], 'summary':[],'app_state':_app_state(exchange)}
-    for item,opposite in [(first,second),(second,first)]:
-        desired=opposite['name'] if first['state']=='old' else item['name']
-        result['summary'].append({'date':item['date'],'sector':item['sector'],'before':item['name'],'after':desired})
+            'exchange':exchange.pk,'decision_type':'bundle' if _is_bundle(exchange) else 'single',
+            'connection':connection.connected_at.isoformat(),'email':connection.email,
+            'already_applied':already,'cells':[], 'summary':[],'app_state':_app_state(exchange)}
+    if _is_bundle(exchange):result['bundle_fingerprint']=exchange.fingerprint
+    for item,old_owner,new_owner,side in slots:
+        desired=item['name'] if already else canonical[new_owner.pk]
+        result['summary'].append({'date':item['date'],'sector':item['sector'],'before':item['name'],'after':desired,'side':side})
         for cell in item['cells']:
             result['cells'].append({**cell,'new_name':desired})
     coordinates=[(cell['row'],cell['column']) for cell in result['cells']]
-    if len(coordinates)!=len(set(coordinates)):raise EditorError('As duas atividades apontam para a mesma célula; confira a origem.')
+    if len(coordinates)!=len(set(coordinates)):raise EditorError('As atividades apontam para a mesma célula; confira a origem.')
     return result
 
 
@@ -172,14 +245,32 @@ def _exchange(pk):
     return Exchange.objects.select_related('offered__resident','requested__resident','proposer','recipient').get(pk=pk)
 
 
-def preview_exchange(account,pk):
+def _bundle(pk):
+    from .models import BundleExchange
+    return BundleExchange.objects.select_related('proposer','recipient').prefetch_related('items__shift__resident','items__original_owner').get(pk=pk)
+
+
+def _preview(account,decision):
     if not is_account_enabled(account) or not account.is_superuser:raise EditorError('Somente o administrador pode preparar este teste.')
-    exchange=_exchange(pk);source,_=_eligible(exchange,account)
+    source,_=_eligible(decision,account)
     try:
-        with authorized_session(account) as session:plan=make_plan(exchange,session,account)
+        with authorized_session(account) as session:plan=make_plan(decision,session,account)
     except EditorError:raise
     except Exception as error:raise EditorError('Não foi possível ler a fonte com essa conta Google. Confira a conexão e o acesso de editor.') from error
-    return SheetsWritePreview.objects.create(exchange=exchange,account=account,source=source,plan=plan)
+    target={'bundle':decision} if _is_bundle(decision) else {'exchange':decision}
+    return SheetsWritePreview.objects.create(**target,account=account,source=source,plan=plan)
+
+
+def preview_exchange(account,pk):
+    return _preview(account,_exchange(pk))
+
+
+def preview_bundle_exchange(account,pk):
+    return _preview(account,_bundle(pk))
+
+
+def _decision(preview):
+    return _bundle(preview.bundle_id) if preview.bundle_id else _exchange(preview.exchange_id)
 
 
 def _fingerprint(plan):
@@ -191,7 +282,8 @@ def apply_preview(account,pk):
     with transaction.atomic():
         preview=SheetsWritePreview.objects.select_for_update().get(pk=pk,account=account)
         if preview.state!='preview' or timezone.now()-preview.created_at>timedelta(minutes=10):raise EditorError('Esta prévia já foi utilizada ou expirou. Prepare outra conferência.')
-        busy=SheetsWritePreview.objects.filter(exchange=preview.exchange,state='writing')
+        target={'bundle_id':preview.bundle_id} if preview.bundle_id else {'exchange_id':preview.exchange_id}
+        busy=SheetsWritePreview.objects.filter(**target,state='writing')
         cutoff=timezone.now()-timedelta(minutes=10)
         busy.filter(Q(started_at__lt=cutoff)|Q(started_at__isnull=True,created_at__lt=cutoff)).update(
             state='unknown',message='Envio interrompido; o resultado precisa ser conferido por uma nova prévia.')
@@ -199,11 +291,11 @@ def apply_preview(account,pk):
         preview.state='writing';preview.started_at=timezone.now();preview.save(update_fields=['state','started_at'])
     sending=False
     try:
-        exchange=_exchange(preview.exchange_id)
+        exchange=_decision(preview)
         with authorized_session(account) as session:
             current=make_plan(exchange,session,account)
             if _fingerprint(current)!=_fingerprint(preview.plan):raise EditorError('A planilha, a conta Google ou a troca mudou desde a prévia. Confira novamente; nada foi gravado.')
-            latest=_exchange(preview.exchange_id)
+            latest=_decision(preview)
             source,connection=_eligible(latest,account)
             if (_app_state(latest)!=current['app_state'] or source.spreadsheet_id!=current['spreadsheet_id']
                     or connection.connected_at.isoformat()!=current['connection']):
@@ -216,7 +308,7 @@ def apply_preview(account,pk):
                         'rows':[{'values':[{'userEnteredValue':{'stringValue':cell['new_name']}}]}], 'fields':'userEnteredValue'}})
                 sending=True
                 _request_json(session,'POST',API+current['spreadsheet_id']+':batchUpdate',json={'requests':requests})
-                confirmed=make_plan(_exchange(preview.exchange_id),session,account)
+                confirmed=make_plan(_decision(preview),session,account)
                 if not confirmed['already_applied']:raise EditorError('O retorno Google não confirmou todos os nomes. Confira o resultado antes de reenviar.')
         preview.state='done';preview.message='Troca conferida na planilha.'
     except Exception as error:

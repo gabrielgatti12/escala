@@ -45,6 +45,9 @@ class Command(BaseCommand):
                 book.close()
         else:
             raise ValueError('Use um arquivo .csv ou .xlsx.')
+        from schedule.bundle_integrations import accepted_bundle_shift_ids,cancel_pending_bundles
+        protected_bundle_ids=accepted_bundle_shift_ids()
+        affected=set()
         seen = set()
         for number, row in enumerate(rows, 2):
             required = ['id','residente','inicio','fim','setor']
@@ -72,11 +75,15 @@ class Command(BaseCommand):
             if existing:
                 if existing.source:
                     raise ValueError(f'Linha {number}: o identificador pertence a uma fonte sincronizada; altere o registro na fonte de origem.')
-                exchanged = Exchange.objects.filter(status='accepted').filter(Q(offered=existing)|Q(requested=existing)).exists()
+                exchanged = (Exchange.objects.filter(status='accepted').filter(Q(offered=existing)|Q(requested=existing)).exists()
+                             or existing.pk in protected_bundle_ids)
                 if exchanged:
                     # Never silently undo an accepted exchange from stale spreadsheet data.
                     if (existing.starts_at,existing.ends_at,existing.sector) != (dates[0],dates[1],str(row['setor']).strip()):
                         raise ValueError(f'Linha {number}: plantão trocado exige conciliação manual antes de alterar horário/setor.')
                     continue
+            if existing and (existing.resident_id,existing.starts_at,existing.ends_at,existing.sector)!=(resident.pk,dates[0],dates[1],str(row['setor']).strip()):
+                affected.add(existing.pk)
             Shift.objects.update_or_create(external_id=external_id,defaults={'resident':resident,'starts_at':dates[0],'ends_at':dates[1],'sector':str(row['setor']).strip()})
+        cancel_pending_bundles(affected,now=timezone.now())
         return len(rows)

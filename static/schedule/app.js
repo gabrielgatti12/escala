@@ -4,6 +4,9 @@
   const allocation = document.getElementById('allocation-dialog');
   const offered = document.getElementById('exchange-offered');
   const requested = document.getElementById('exchange-requested');
+  const recipient = document.getElementById('exchange-recipient');
+  const recipientSearch = document.getElementById('exchange-recipient-search');
+  const recipientState = {version: 0, controller: null, timer: null, pending: false, error: ''};
   const mine = document.getElementById('allocation-mine');
   const theirs = document.getElementById('allocation-theirs');
   const allocationDay = document.getElementById('allocation-day');
@@ -21,11 +24,11 @@
   }
   function updateExchangeState() {
     if (!submitExchange) return;
-    const states = [...choiceState.values()];
+    const states = [...choiceState.values(), recipientState];
     const errors = states.map(state => state.error).filter(Boolean);
-    submitExchange.disabled = states.some(state => state.pending || state.error) || !compatibleShifts(selectedShift(offered), selectedShift(requested));
+    submitExchange.disabled = states.some(state => state.pending || state.error) || !compatibleShifts(selectedShift(offered), selectedShift(requested)) || !!(recipient?.value && selectedShift(requested)?.dataset.residentId !== recipient.value);
     exchangeError.hidden = !errors.length;
-    exchangeError.textContent = errors.length ? 'Não foi possível carregar os plantões. Confira sua conexão e tente novamente.' : '';
+    exchangeError.textContent = errors.length ? 'Não foi possível carregar os plantões ou residentes. Confira sua conexão e tente novamente.' : '';
     exchangeRetry.hidden = !errors.length;
   }
   function cancelChoices(select) {
@@ -35,6 +38,75 @@
     clearTimeout(state.timer);
     state.pending = false;
   }
+  function cancelResidents() {
+    recipientState.version += 1;
+    recipientState.controller?.abort();
+    clearTimeout(recipientState.timer);
+    recipientState.pending = false;
+  }
+  async function loadResidents(selected = recipient?.value || '') {
+    if (!recipient || !exchange?.open) return false;
+    cancelResidents();
+    const version = recipientState.version;
+    const session = dialogVersion;
+    const controller = new AbortController();
+    recipientState.controller = controller;
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
+    recipientState.pending = true;
+    recipientState.error = '';
+    recipient.disabled = true;
+    updateExchangeState();
+    const counter = document.getElementById('exchange-recipient-count');
+    counter.textContent = 'Carregando residentes…';
+    const params = new URLSearchParams({side: 'residents', q: recipientSearch?.value || '', selected});
+    try {
+      const response = await fetch(`${exchange.dataset.choicesUrl}?${params}`, {credentials: 'same-origin', cache: 'no-store', signal: controller.signal, headers: {Accept: 'application/json'}});
+      if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('residents');
+      const payload = await response.json();
+      if (!Array.isArray(payload.options)) throw new Error('residents');
+      if (version !== recipientState.version || session !== dialogVersion || !exchange.open) return false;
+      recipient.replaceChildren(new Option('Todos os colegas', ''));
+      for (const item of payload.options) recipient.add(new Option(item.label, item.id));
+      recipient.value = payload.selected || '';
+      recipient.disabled = false;
+      counter.textContent = payload.has_more ? 'Exibindo 100 residentes. Busque pelo nome para encontrar os demais.' : 'Escolha o destinatário ou busque um plantão de qualquer colega.';
+      return true;
+    } catch (error) {
+      if ((error.name === 'AbortError' && !timedOut) || version !== recipientState.version || session !== dialogVersion || !exchange.open) return false;
+      recipientState.error = 'residents';
+      recipient.disabled = true;
+      counter.textContent = 'Falha ao carregar os residentes.';
+      return false;
+    } finally {
+      clearTimeout(timeout);
+      if (version === recipientState.version && session === dialogVersion) {
+        recipientState.pending = false;
+        updateExchangeState();
+      }
+    }
+  }
+  function chooseRecipient(option) {
+    if (!recipient || !option?.dataset.residentId || recipient.value === option.dataset.residentId) return;
+    const id = option.dataset.residentId;
+    if (![...recipient.options].some(item => item.value === id)) recipient.add(new Option(option.dataset.residentName || 'Residente selecionado', id));
+    recipient.value = id;
+    // Preserve a card's owner even if it is outside the first resident page.
+    loadResidents(id);
+  }
+  recipientSearch?.addEventListener('input', () => {
+    if (!exchange.open) return;
+    cancelResidents();
+    recipientState.pending = true;
+    recipient.disabled = true;
+    updateExchangeState();
+    recipientState.timer = setTimeout(() => loadResidents(), 250);
+  });
+  recipient?.addEventListener('change', () => {
+    requested.value = '';
+    loadChoices(offered, offered.value, '');
+    loadChoices(requested, '');
+  });
   async function loadChoices(select, selected = select.value, anchorOverride = null) {
     if (!exchange?.open) return false;
     const state = choiceState.get(select);
@@ -53,7 +125,7 @@
     updateExchangeState();
     const other = select === offered ? requested : offered;
     const input = searches.find(field => field.dataset.filterSelect === select.id);
-    const params = new URLSearchParams({side: select === offered ? 'offered' : 'requested', q: input?.value || '', selected: selected || '', anchor: anchorOverride === null ? other.value : anchorOverride});
+    const params = new URLSearchParams({side: select === offered ? 'offered' : 'requested', q: input?.value || '', selected: selected || '', anchor: anchorOverride === null ? other.value : anchorOverride, recipient: select === requested ? recipient?.value || '' : ''});
     try {
       const response = await fetch(`${exchange.dataset.choicesUrl}?${params}`, {credentials: 'same-origin', cache: 'no-store', signal: controller.signal, headers: {Accept: 'application/json'}});
       if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('choices');
@@ -65,12 +137,18 @@
         const option = new Option(item.label, item.id);
         option.dataset.category = item.category;
         option.dataset.group = item.group;
+        option.dataset.residentId = item.resident_id;
+        option.dataset.residentName = item.resident_name;
         select.add(option);
       }
       select.value = payload.selected || '';
+      if (select === requested) chooseRecipient(selectedShift(select));
       select.disabled = !payload.options.length;
       counter.textContent = payload.has_more ? `Exibindo ${payload.options.length} plantões. Busque por nome, data ou setor para encontrar outros.` : payload.options.length ? `${payload.options.length} plantão(ões) encontrado(s).` : 'Nenhum plantão compatível encontrado. Altere a busca ou a seleção.';
       if (selected && !payload.selected) counter.textContent = 'O plantão selecionado não está mais disponível. Escolha outro.';
+      if (select === requested && select.value && (params.get('recipient') || '') !== (recipient?.value || '')) {
+        return await loadChoices(select, select.value, anchorOverride);
+      }
       return true;
     } catch (error) {
       if ((error.name === 'AbortError' && !timedOut) || version !== state.version || session !== dialogVersion || !exchange.open) return false;
@@ -101,8 +179,10 @@
     select.addEventListener('change', () => {
       const other = select === offered ? requested : offered;
       if (selectedShift(select) && selectedShift(other) && !compatibleShifts(selectedShift(select), selectedShift(other))) other.value = '';
+      if (select === requested && selectedShift(requested)) chooseRecipient(selectedShift(requested));
       updateExchangeState();
       loadChoices(other);
+      if (select === requested && requested.value) loadChoices(requested);
     });
   }
   exchange?.querySelector('form')?.addEventListener('submit', event => {
@@ -112,11 +192,13 @@
   exchangeRetry?.addEventListener('click', () => {
     // Rebuild both sides so a stale or removed anchor cannot trap the dialog.
     offered.value = requested.value = '';
-    Promise.all([loadChoices(offered, '', ''), loadChoices(requested, '', '')]);
+    if (recipient) recipient.value = '';
+    Promise.all([loadResidents(''), loadChoices(offered, '', ''), loadChoices(requested, '', '')]);
   });
   exchange?.addEventListener('close', () => {
     dialogVersion += 1;
     for (const select of choiceState.keys()) cancelChoices(select);
+    cancelResidents();
     updateExchangeState();
   });
   function updateAllocationSubmit() {
@@ -160,7 +242,12 @@
         choiceState.get(select).error = '';
       }
       searches.forEach(input => { input.value = ''; });
+      cancelResidents();
+      recipientState.error = '';
+      if (recipient) recipient.replaceChildren(new Option('Todos os colegas', ''));
+      if (recipientSearch) recipientSearch.value = '';
       exchange.showModal();
+      loadResidents('');
       updateExchangeState();
       if (button.dataset.offered || button.dataset.requested) {
         const first = button.dataset.offered ? offered : requested;

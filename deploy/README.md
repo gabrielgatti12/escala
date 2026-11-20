@@ -1,5 +1,22 @@
 # Implantação na instância Oracle
 
+## Atualização de cores, observações e reversões manuais
+
+Esta versão exige as migrações **0021 e 0022**. Preserve as credenciais e o volume do banco e execute na instalação existente:
+
+```bash
+cd /opt/escala-app &&
+git pull --ff-only origin codex/escala-inicial &&
+bash scripts/oracle-compose.sh build &&
+bash scripts/oracle-compose.sh stop web sync &&
+bash scripts/oracle-compose.sh run --rm web python manage.py migrate --noinput &&
+bash scripts/oracle-compose.sh up -d
+```
+
+Depois entre como o administrador que conectou o Google e clique **Planilhas e fontes → Atualizar agora**. A conferência OAuth de trocas previamente gravadas reconhece uma reversão completa dos nomes originais; o trabalhador importa em seguida as cores dos setores e observações. Confira as mensagens e o resumo das fontes. Se a conexão expirou, reconecte a conta Google em **Testar gravação no Google** e solicite a atualização outra vez. A leitura diária por chave pública não substitui a conferência OAuth de uma reversão.
+
+A nova prévia de uma troca aceita que já esteja gravada pode corrigir a fonte para **#0000ff** sem regravar os nomes. Essa correção exige sua confirmação; a atualização do aplicativo e a sincronização não recolorem nomes na origem automaticamente. Nenhum desses testes locais comprova implantação na Oracle.
+
 ## Atualização: troca direta de dia e conjunto de estágios
 
 As migrações **0019 e 0020** adicionam propostas privadas de conjuntos (como PR + CC por Pré-Operatório) e sua prévia no piloto Google. A conexão OAuth e os arquivos privados já instalados continuam em uso; não é necessário criar outro cliente Google. Atualize o código e o banco antes de abrir as telas novas:
@@ -235,6 +252,6 @@ Se ainda não havia o include, acrescente-o ao bloco HTTPS existente conforme a 
 
 O piloto só aceita trocas com consentimento de ambos, mesma fonte semanal, categoria regular, período 23–29/11/2026 e atividades futuras sem conciliação. Trocas entre arquivos, plantões mensais, divisões de duplas, nomes ambíguos e atividades com várias trocas aceitas são recusadas neste teste inicial. Use uma troca combinada com o colega e evite edições simultâneas nas células durante a conferência. A API Sheets aplica as mudanças enviadas em um único lote, mas a leitura de conferência e a escrita não são uma comparação e gravação atômicas; não há promessa de exclusão contra editores externos.
 
-A prévia dura dez minutos e só pode ser enviada uma vez. Se houver timeout, o status fica Resultado a conferir; prepare outra prévia após conferir a origem. Se o Google já tiver aplicado os dois nomes, a nova prévia apenas reconhece o resultado, sem repetir a gravação. Envio que ficou marcado como Em andamento após interrupção do processo exige aguardar dez minutos e preparar uma nova conferência; a aplicação não reenvia automaticamente. Uma divergência parcial ou nome diferente bloqueia a gravação. Desconectar remove o token local e desativa o teste; a autorização também pode ser revogada na segurança da própria conta Google.
+A prévia dura dez minutos e só pode ser enviada uma vez. Se houver timeout, o status fica Resultado a conferir; prepare outra prévia após conferir a origem. Se o Google já tiver aplicado os nomes e a fonte azul #0000ff, a nova prévia apenas reconhece o resultado, sem repetir a gravação. Quando somente a cor divergir, a prévia permite corrigir apenas a fonte sem regravar nomes ou fórmulas. Envio que ficou marcado como Em andamento após interrupção do processo exige aguardar dez minutos e preparar uma nova conferência; a aplicação não reenvia automaticamente. Uma divergência parcial ou nome diferente bloqueia a gravação. Desconectar remove o token local e desativa o teste; a autorização também pode ser revogada na segurança da própria conta Google.
 
 Guarde a chave de criptografia junto aos backups privados: perder ou trocar a chave exige reconectar o Google. O token fica criptografado no banco, mas cópias do banco continuam sendo dados privados. A migração 0018 e os testes locais não comprovam OAuth real, acesso de editor ou implantação na Oracle; essas etapas dependem da configuração acima.

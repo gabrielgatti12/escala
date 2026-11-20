@@ -131,7 +131,10 @@ def sync_workbook(book, source):
     before=snapshot_source(source,now=snapshot_time) if previous_success else {}
     if 'Espelho Semanal' not in book.sheetnames:
         raise SheetFormatError('Aba Espelho Semanal ausente; nada foi alterado.')
-    rows=list(book['Espelho Semanal'].values)
+    from .source_metadata import theme_palette,heading_colors,right_note,update_metadata
+    cell_rows=list(book['Espelho Semanal'].iter_rows())
+    rows=[[cell.value for cell in row] for row in cell_rows]
+    palette=theme_palette(book)
     if not rows:
         raise SheetFormatError('Espelho Semanal vazio.')
     days=[(i,v.date()) for i,v in enumerate(rows[0]) if isinstance(v,datetime)]
@@ -153,9 +156,23 @@ def sync_workbook(book, source):
     ).values_list('offered_id','requested_id','proposer_id','recipient_id'):
         former_owners[offered_id].add(proposer_id)
         former_owners[requested_id].add(recipient_id)
+    from .sheets_reconciliation import reverted_identity_slots,source_conflict_shift_ids
+    source_conflicts=source_conflict_shift_ids(source)
+    reverted_slots=defaultdict(list)
+    pending_reverted_cells=defaultdict(list)
+    for restored in reverted_identity_slots(source):
+        reverted_slots[(restored.source_cell,restored.starts_at,restored.ends_at,restored.sector)].append(restored)
+        if (restored.source_snapshot or {}).get('google_revert_export_pending'):
+            pending_reverted_cells[restored.source_cell].append(restored)
+    allocated_metadata=defaultdict(list)
+    for allocation_id,mine_id,theirs_id in Allocation.objects.filter(status='accepted').filter(
+        Q(mine__source=source)|Q(theirs__source=source)
+    ).values_list('pk','mine_id','theirs_id'):
+        for activity_id in [mine_id,theirs_id]:
+            allocated_metadata[activity_id].append(f'allocation:{allocation_id}:{activity_id}')
     seen=[]; shared_seen=[]; incomplete_seen=[]; rest_count=0; occurrences={}; preserved=0; conflict_ids=set()
     for col,day in days:
-        sector=''; location=''
+        sector=''; location='';sector_colors={'source_background':'','source_foreground':''}
         for row_number,row in enumerate(rows[2:],3):
             def cell(offset): return row[col+offset] if len(row)>col+offset else None
             if row and row[0]:
@@ -164,6 +181,25 @@ def sync_workbook(book, source):
             has_names=any(isinstance(cell(offset),str) and cell(offset).strip() for offset in [4,5])
             source_cell=f'{get_column_letter(col+2)}{row_number}:{get_column_letter(col+6)}{row_number}'
             parsed=parse_shift_hours(day,cell(1))
+            metadata={**sector_colors,'notes':right_note(row,col)}
+            pending_restored=pending_reverted_cells.get(source_cell,[])
+            if pending_restored:
+                parsed_people={resident_for(cell(offset)).pk for offset in [4,5]
+                               if isinstance(cell(offset),str) and cell(offset).strip()}
+                if (any((item.source_snapshot or {}).get('google_revert_check_conflict') for item in pending_restored)
+                    or len(parsed_people)!=1 or parsed is None or any(
+                    (item.starts_at,item.ends_at,item.sector)!=(parsed[0],parsed[1],f'{location} · {sector}'[:120])
+                    for item in pending_restored
+                )):
+                    # A changed/partial export is not evidence to discard the
+                    # identity of an undo already confirmed by the Google API.
+                    for restored in pending_restored:
+                        update_metadata(restored,metadata)
+                        restored.requires_reconciliation=True;restored.wants_exchange=False
+                        restored.save(update_fields=['requires_reconciliation','wants_exchange'])
+                        seen.append(restored.external_id);conflict_ids.add(restored.pk)
+                        preserved+=1
+                    continue
             if match and not has_names: continue
             if parsed is None and has_names:
                 if not sector:
@@ -173,7 +209,7 @@ def sync_workbook(book, source):
                 external_id=digest(key)
                 incomplete_seen.append(external_id)
                 if is_rest_sector(sector): rest_count+=1
-                activity,_=IncompleteActivity.objects.update_or_create(external_id=external_id,defaults={'source':source,'source_cell':source_cell,'date':day,'sector':f'{location} · {sector}'[:120],'raw_time':str(cell(1) or '')[:100]})
+                activity,_=IncompleteActivity.objects.update_or_create(external_id=external_id,defaults={'source':source,'source_cell':source_cell,'date':day,'sector':f'{location} · {sector}'[:120],'raw_time':str(cell(1) or '')[:100],**metadata})
                 activity.residents.set(users)
                 continue
             if not match:
@@ -181,8 +217,10 @@ def sync_workbook(book, source):
                 if not has_names:
                     if isinstance(cell(1),str) and cell(1).strip():
                         sector=cell(1).strip()
+                        sector_colors=heading_colors(cell_rows[row_number-1][col+1],palette)
                     elif isinstance(cell(0),str) and cell(0).strip() and not re.fullmatch(r'R[123]|C[123][ab]?',cell(0).strip(),re.I):
                         sector=cell(0).strip()
+                        sector_colors=heading_colors(cell_rows[row_number-1][col],palette)
                 continue
             if has_names and not sector:
                 raise SheetFormatError(f'Linha {row_number}: setor não identificado acima dos nomes; importação cancelada.')
@@ -197,8 +235,10 @@ def sync_workbook(book, source):
                 key=f'{day}|{start.isoformat()}|{end.isoformat()}|{label}|'+','.join(u.username for u in users)
                 ext=f'{source[:40]}:{digest(key)}'
                 shared_seen.append(ext)
-                activity,_=SharedActivity.objects.update_or_create(external_id=ext,defaults={'source':source,'active':True,'source_cell':source_cell,'starts_at':start,'ends_at':end,'sector':label})
+                activity,_=SharedActivity.objects.update_or_create(external_id=ext,defaults={'source':source,'active':True,'source_cell':source_cell,'starts_at':start,'ends_at':end,'sector':label,**metadata})
                 activity.residents.set(users)
+                if activity.pk in allocated_metadata:
+                    Shift.objects.filter(external_id__in=allocated_metadata[activity.pk]).update(**metadata)
                 continue
             for user in users:
                 label=f'{location} · {sector}'[:120]
@@ -209,11 +249,12 @@ def sync_workbook(book, source):
                 if len(acknowledged)>1:
                     raise SheetFormatError('Há decisões duplicadas para a mesma atividade; confira a conciliação.')
                 decision=acknowledged[0] if acknowledged else None
+                if decision:update_metadata(decision,metadata)
                 if decision and user.pk!=decision.resident_id and user.pk in former_owners[decision.pk]:
                     # A cached/old source may still contain a former owner,
                     # including after a previous read acknowledged the swap.
                     seen.append(decision.external_id)
-                    if decision.requires_reconciliation:
+                    if decision.requires_reconciliation and decision.pk not in source_conflicts:
                         decision.requires_reconciliation=False;decision.save(update_fields=['requires_reconciliation'])
                     preserved+=1
                     continue
@@ -226,6 +267,28 @@ def sync_workbook(book, source):
                     seen.append(decision.external_id)
                     preserved+=1
                     continue
+                restored=None
+                if not decision:
+                    reverted=reverted_slots.get((source_cell,start,end,label),[])
+                    if len(reverted)>1:
+                        raise SheetFormatError('Há identidades duplicadas para uma atividade desfeita; confira a conciliação.')
+                    restored=reverted[0] if reverted else None
+                    if restored and user.pk!=restored.resident_id:
+                        snapshot=restored.source_snapshot or {}
+                        if snapshot.get('google_revert_export_pending'):
+                            # OAuth confirmed the undo, but Google's XLSX export
+                            # can still contain the swapped name. Wait for the
+                            # export to acknowledge the restored owner.
+                            update_metadata(restored,metadata)
+                            seen.append(restored.external_id)
+                            if user.pk!=snapshot.get('google_revert_previous_owner'):
+                                restored.requires_reconciliation=True
+                                restored.wants_exchange=False
+                                restored.save(update_fields=['requires_reconciliation','wants_exchange'])
+                                conflict_ids.add(restored.pk)
+                            preserved+=1
+                            continue
+                        restored=None  # Subsequent source edits remain authoritative.
                 seen.append(ext)
                 shift=Shift.objects.select_for_update().filter(external_id=ext).first()
                 if decision and user.pk==decision.resident_id:
@@ -235,13 +298,25 @@ def sync_workbook(book, source):
                     if shift.external_id!=ext:
                         shift.external_id=ext
                         shift.save(update_fields=['external_id'])
+                if restored:
+                    if shift and shift.pk!=restored.pk:
+                        raise SheetFormatError('Há identidades duplicadas para a atividade desfeita; confira a conciliação.')
+                    shift=restored
+                    shift.external_id=ext
+                    snapshot=dict(shift.source_snapshot or {})
+                    snapshot.pop('google_revert_export_pending',None)
+                    snapshot.pop('google_revert_previous_owner',None)
+                    shift.source_snapshot=snapshot
+                    shift.requires_reconciliation=shift.pk in source_conflicts
+                    shift.save(update_fields=['external_id','source_snapshot','requires_reconciliation'])
                 if shift and shift.pk in accepted_source_ids:
+                    update_metadata(shift,metadata)
                     shift.source_cell=source_cell
-                    shift.requires_reconciliation=False
+                    shift.requires_reconciliation=shift.pk in source_conflicts
                     shift.save(update_fields=['source_cell','requires_reconciliation'])
                     preserved+=1
                     continue
-                Shift.objects.update_or_create(external_id=ext,defaults={'source':source,'active':True,'source_cell':source_cell,'resident':user,'starts_at':start,'ends_at':end,'sector':label})
+                Shift.objects.update_or_create(external_id=ext,defaults={'source':source,'active':True,'source_cell':source_cell,'resident':user,'starts_at':start,'ends_at':end,'sector':label,**metadata})
     if not seen and not shared_seen and not incomplete_seen:
         raise SheetFormatError('Nenhum horário reconhecido; sincronização cancelada para preservar os dados.')
     removed_shared=list(SharedActivity.objects.filter(source=source,allocated_to__isnull=True).exclude(external_id__in=shared_seen).values_list('pk',flat=True))
@@ -250,7 +325,9 @@ def sync_workbook(book, source):
     assigned_obsolete=SharedActivity.objects.filter(source=source,allocated_to__isnull=False).exclude(external_id__in=shared_seen).count()
     obsolete=Shift.objects.filter(source=source).exclude(external_id__in=seen)
     protected=list(Exchange.objects.filter(status='accepted').values_list('offered_id','requested_id'))
-    protected_ids={pk for pair in protected for pk in pair}|bundle_ids
+    awaiting_export={item.pk for items in pending_reverted_cells.values() for item in items
+                     if (item.source_snapshot or {}).get('google_revert_export_pending')}
+    protected_ids={pk for pair in protected for pk in pair}|bundle_ids|awaiting_export
     # Accepted exchanges remain available for manual reconciliation when their source changes.
     held=obsolete.filter(pk__in=protected_ids)
     retained=held.count()

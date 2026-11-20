@@ -156,7 +156,7 @@ def respond_allocation(user,pk,action):
                     raise ValidationError('A divisão causaria conflito com um plantão já confirmado.')
                 activity.allocated_to_id=owner_id
                 activity.save(update_fields=['allocated_to'])
-                Shift.objects.create(external_id=f'allocation:{allocation.pk}:{activity.pk}',resident_id=owner_id,starts_at=activity.starts_at,ends_at=activity.ends_at,sector=activity.sector)
+                Shift.objects.create(external_id=f'allocation:{allocation.pk}:{activity.pk}',resident_id=owner_id,starts_at=activity.starts_at,ends_at=activity.ends_at,sector=activity.sector,source_background=activity.source_background,source_foreground=activity.source_foreground,notes=activity.notes)
             Allocation.objects.filter(status='pending').exclude(pk=pk).filter(Q(mine_id__in=activities)|Q(theirs_id__in=activities)).update(status='cancelled',resolved_at=timezone.now())
         allocation.status='accepted' if action=='accept' else 'rejected'
     else: raise ValidationError('Você não pode realizar esta ação.')

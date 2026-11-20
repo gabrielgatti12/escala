@@ -1,6 +1,7 @@
 """Manual, previewed pilot: accepted regular exchanges in 23–29 November 2026 only."""
 import hashlib
 import json
+from copy import deepcopy
 from datetime import date, datetime, timedelta
 
 from django.core.exceptions import ValidationError
@@ -20,6 +21,8 @@ WEEK = date(2026,11,23)
 LAST = date(2026,11,29)
 TAB = 'Espelho Semanal'
 API = 'https://sheets.googleapis.com/v4/spreadsheets/'
+BLUE_COLOR = {'red':0,'green':0,'blue':1}
+FONT_COLOR_FIELD = 'userEnteredFormat.textFormat.foregroundColorStyle'
 
 
 def pilot_sources():
@@ -131,7 +134,7 @@ def _request_json(session,method,url,**kwargs):
 
 
 def _read_book(session,source):
-    fields='sheets(properties(sheetId,title,gridProperties),merges,data(startRow,startColumn,rowData(values(userEnteredValue,effectiveValue,formattedValue))))'
+    fields='sheets(properties(sheetId,title,gridProperties),merges,data(startRow,startColumn,rowData(values(userEnteredValue,effectiveValue,formattedValue,userEnteredFormat(textFormat),effectiveFormat(textFormat),textFormatRuns))))'
     payload=_request_json(session,'GET',API+source.spreadsheet_id,params={'ranges':"'Espelho Semanal'",'includeGridData':'true','fields':fields})
     sheets=[s for s in payload.get('sheets',[]) if s.get('properties',{}).get('title')==TAB]
     if len(sheets)!=1:raise EditorError('A aba Espelho Semanal não foi encontrada na fonte.')
@@ -156,6 +159,53 @@ def _matches(name,person):
     name=' '.join(str(name).split())
     key=f'{slugify(name)[:100]}-{digest(name.casefold())[:8]}'
     return person.username==key or name.casefold()==' '.join((person.get_full_name() or person.username).split()).casefold()
+
+
+def _blue_text_format(text_format):
+    style=text_format.get('foregroundColorStyle')
+    if style is not None:
+        color=style.get('rgbColor')
+    else:
+        color=text_format.get('foregroundColor')
+    if not isinstance(color,dict):return False
+    return all(abs(color.get(channel,0)-value)<1e-6 for channel,value in BLUE_COLOR.items()) and abs(color.get('alpha',1)-1)<1e-6
+
+
+def _blue_font(cell):
+    entered=cell.get('userEnteredFormat',{}).get('textFormat',{})
+    effective=cell.get('effectiveFormat',{}).get('textFormat',{})
+    # Effective colors also account for a sheet's theme. Fall back to the entered
+    # format when Google omits effective formatting from an otherwise valid cell.
+    base=effective if any(key in effective for key in ['foregroundColorStyle','foregroundColor']) else entered
+    if not _blue_text_format(base):return False
+    for run in cell.get('textFormatRuns',[]):
+        text_format=run.get('format',{})
+        if any(key in text_format for key in ['foregroundColorStyle','foregroundColor']) and not _blue_text_format(text_format):return False
+    return True
+
+
+def _color_update(cell,write_name):
+    value={'userEnteredFormat':{'textFormat':{'foregroundColorStyle':{'rgbColor':BLUE_COLOR.copy()}}}}
+    fields=[FONT_COLOR_FIELD]
+    if write_name:
+        # Sheets clears existing rich-text runs when replacing the cell value.
+        value['userEnteredValue']={'stringValue':cell['new_name']}
+        fields.insert(0,'userEnteredValue')
+    else:
+        runs=deepcopy(cell.get('text_format_runs',[]))
+        changed=False
+        for run in runs:
+            text_format=run.get('format',{})
+            if any(key in text_format for key in ['foregroundColorStyle','foregroundColor']) and not _blue_text_format(text_format):
+                text_format.pop('foregroundColor',None)
+                text_format['foregroundColorStyle']={'rgbColor':BLUE_COLOR.copy()}
+                changed=True
+        if changed:
+            # A runs array is replaced as a whole by the API. Keep every run and
+            # its other formatting, changing only explicit foreground colors.
+            value['textFormatRuns']=runs
+            fields.append('textFormatRuns')
+    return value,','.join(fields)
 
 
 def _slot(sheet,cells,shift,old_owner,new_owner):
@@ -196,7 +246,10 @@ def _slot(sheet,cells,shift,old_owner,new_owner):
                     raise EditorError('A mesclagem dos nomes excede a atividade. Este caso precisa de conferência.')
         cell=cells.get((row,column),{})
         occupied.append({'row':row-1,'column':column-1,'old':cell.get('userEnteredValue',{}),
-                         'name':name,'address':get_column_letter(column)+str(row)})
+                         'name':name,'address':get_column_letter(column)+str(row),
+                         'font_format':cell.get('userEnteredFormat',{}).get('textFormat',{}),
+                         'effective_font_format':cell.get('effectiveFormat',{}).get('textFormat',{}),
+                         'text_format_runs':cell.get('textFormatRuns',[]),'font_is_blue':_blue_font(cell)})
     if not occupied:raise EditorError('A origem não contém o residente desta atividade.')
     old=all(_matches(cell['name'],old_owner) for cell in occupied)
     final=all(_matches(cell['name'],new_owner) for cell in occupied)
@@ -238,6 +291,7 @@ def make_plan(exchange,session,account):
             result['cells'].append({**cell,'new_name':desired})
     coordinates=[(cell['row'],cell['column']) for cell in result['cells']]
     if len(coordinates)!=len(set(coordinates)):raise EditorError('As atividades apontam para a mesma célula; confira a origem.')
+    result['needs_color']=any(not cell['font_is_blue'] for cell in result['cells'])
     return result
 
 
@@ -300,16 +354,19 @@ def apply_preview(account,pk):
             if (_app_state(latest)!=current['app_state'] or source.spreadsheet_id!=current['spreadsheet_id']
                     or connection.connected_at.isoformat()!=current['connection']):
                 raise EditorError('A configuração ou a escala mudou durante a conferência. Prepare outra prévia.')
-            if not current['already_applied']:
-                requests=[]
-                for cell in current['cells']:
+            requests=[]
+            for cell in current['cells']:
+                if not current['already_applied'] or not cell['font_is_blue']:
+                    value,fields=_color_update(cell,write_name=not current['already_applied'])
                     requests.append({'updateCells':{'range':{'sheetId':current['sheet_id'],'startRowIndex':cell['row'],
                         'endRowIndex':cell['row']+1,'startColumnIndex':cell['column'],'endColumnIndex':cell['column']+1},
-                        'rows':[{'values':[{'userEnteredValue':{'stringValue':cell['new_name']}}]}], 'fields':'userEnteredValue'}})
+                        'rows':[{'values':[value]}], 'fields':fields}})
+            if requests:
                 sending=True
                 _request_json(session,'POST',API+current['spreadsheet_id']+':batchUpdate',json={'requests':requests})
                 confirmed=make_plan(_decision(preview),session,account)
                 if not confirmed['already_applied']:raise EditorError('O retorno Google não confirmou todos os nomes. Confira o resultado antes de reenviar.')
+                if confirmed['needs_color']:raise EditorError('O retorno Google não confirmou a fonte azul #0000ff. Confira a formatação antes de preparar outra prévia.')
         preview.state='done';preview.message='Troca conferida na planilha.'
     except Exception as error:
         preview.state='unknown' if sending else 'conflict'

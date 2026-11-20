@@ -13,7 +13,7 @@ from .bundle_exchanges import review_bundle, propose_bundle, respond_bundle
 from .google_editor import EditorError
 from .models import BundleExchange, BundleExchangeItem, Exchange, SheetsEditorConnection, SheetsWritePilot, SheetsWritePreview, SheetSource, Shift
 from .sheets import sync_workbook, resident_for
-from .sheets_write import preview_bundle_exchange, preview_exchange, apply_preview
+from .sheets_write import BLUE_COLOR, FONT_COLOR_FIELD, preview_bundle_exchange, preview_exchange, apply_preview
 from .test_sheets_write import GoogleFixture
 
 
@@ -57,14 +57,15 @@ class BundleSheetsPilotTests(TestCase):
         self.assertTrue(all(call[0]=='GET' for call in self.google.calls))
         self.assertIn('formulaValue',self.google.cell(3,5)['userEnteredValue'])
 
-    def test_three_activities_written_together_in_one_batch_with_only_name_fields(self):
+    def test_three_activities_written_together_with_only_name_and_font_color_fields(self):
         self.accept();result=apply_preview(self.admin,self.preview().pk)
         self.assertEqual(result.state,'done')
         posts=[call for call in self.google.calls if call[0]=='POST']
         self.assertEqual(len(posts),1)
         changes=posts[0][2]['json']['requests'];self.assertEqual(len(changes),3)
-        self.assertTrue(all(change['updateCells']['fields']=='userEnteredValue' for change in changes))
+        self.assertTrue(all(change['updateCells']['fields']=='userEnteredValue,'+FONT_COLOR_FIELD for change in changes))
         self.assertEqual([self.google.cell(row,5)['effectiveValue']['stringValue'] for row in [3,5,7]],['Pessoa Dois','Pessoa Dois','Pessoa Um'])
+        self.assertTrue(all(self.google.cell(row,5)['userEnteredFormat']['textFormat']['foregroundColorStyle']=={'rgbColor':BLUE_COLOR} for row in [3,5,7]))
         self.assertEqual(self.google.cell(3,2)['effectiveValue']['stringValue'],'7:45-12')
         self.assertEqual(self.google.cell(5,2)['effectiveValue']['stringValue'],'13-19')
         self.assertEqual(self.google.cell(7,2)['effectiveValue']['stringValue'],'7:40-17')
@@ -76,6 +77,21 @@ class BundleSheetsPilotTests(TestCase):
         result=self.preview();self.assertTrue(result.plan['already_applied'])
         self.assertEqual(apply_preview(self.admin,result.pk).state,'done')
         self.assertEqual(len([call for call in self.google.calls if call[0]=='POST']),initial)
+
+    def test_applied_bundle_can_correct_one_font_without_rewriting_any_names(self):
+        self.accept();self.assertEqual(apply_preview(self.admin,self.preview().pk).state,'done')
+        cell=self.google.cell(5,5)
+        for kind in ['userEnteredFormat','effectiveFormat']:
+            cell[kind]['textFormat']['foregroundColorStyle']={'rgbColor':{'red':0,'green':0,'blue':0}}
+        original=[copy.deepcopy(self.google.cell(row,5)['userEnteredValue']) for row in [3,5,7]]
+        preview=self.preview();self.assertTrue(preview.plan['already_applied']);self.assertTrue(preview.plan['needs_color'])
+        self.assertEqual(apply_preview(self.admin,preview.pk).state,'done')
+        update=[call for call in self.google.calls if call[0]=='POST'][-1][2]['json']['requests']
+        self.assertEqual(len(update),1)
+        self.assertEqual(update[0]['updateCells']['fields'],FONT_COLOR_FIELD)
+        self.assertEqual(update[0]['updateCells']['range']['startRowIndex'],5)
+        self.assertEqual([self.google.cell(row,5)['userEnteredValue'] for row in [3,5,7]],original)
+        self.assertEqual(cell['userEnteredFormat']['textFormat']['foregroundColorStyle'],{'rgbColor':BLUE_COLOR})
 
     def test_partial_application_or_changed_source_never_writes_remaining_activities(self):
         self.accept();result=self.preview()

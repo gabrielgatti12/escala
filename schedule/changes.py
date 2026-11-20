@@ -27,6 +27,7 @@ def _timed_record(activity, kind, status):
         'starts_at': start.isoformat(),
         'ends_at': end.isoformat(),
         'sector': activity.sector,
+        'notes': activity.notes,
         'status': status,
         '_cell': activity.source_cell,
         '_tab': activity.source_tab,
@@ -68,6 +69,7 @@ def snapshot_source(source, *, now=None):
                 'kind': 'incomplete',
                 'date': activity.date.isoformat(),
                 'sector': activity.sector,
+                'notes': activity.notes,
                 'raw_time': activity.raw_time,
                 'status': 'rest' if activity.is_rest else 'time_unknown',
                 '_cell': activity.source_cell,
@@ -151,7 +153,8 @@ def _description(record):
     }
     status_label = allocation_labels.get(record['status'], '')
     suffix = f' ({status_label})' if status_label else ''
-    return f'{date_label} {time_label} · {record["sector"]}{suffix}'
+    notes=f' · Obs.: {record["notes"]}' if record.get('notes') else ''
+    return f'{date_label} {time_label} · {record["sector"]}{suffix}{notes}'
 
 
 def _message(changes):

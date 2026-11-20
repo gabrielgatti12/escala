@@ -73,6 +73,7 @@ def _search(query, text):
 def _option(shift, include_resident):
     start, end = timezone.localtime(shift.starts_at), timezone.localtime(shift.ends_at)
     label = f'{start:%d/%m/%Y} · {start:%H:%M}–{end:%H:%M} · {sector_label(shift.sector)}'
+    if shift.notes:label+=f' · Obs.: {shift.notes}'
     if shift.category != 'regular':
         label += f' · {shift.get_category_display()} {shift.resident_group}'
     if include_resident:

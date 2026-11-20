@@ -23,6 +23,33 @@ def sector_hue(label):
     number=int(hashlib.sha256(sector_key(label).encode()).hexdigest()[:8],16)
     return f'{number / 0xffffffff * 360:.2f}'
 
+_HEX_COLOR = re.compile(r'^#[0-9a-fA-F]{6}$')
+
+
+def source_color(value):
+    """Only a literal six-digit CSS color may enter an inline style."""
+    return value.upper() if isinstance(value, str) and _HEX_COLOR.fullmatch(value) else ''
+
+
+def activity_style(item):
+    """Use imported activity colors, retaining stable fallback hues for old data."""
+    parts = [f'--sector-hue:{sector_hue(getattr(item, "sector", ""))}']
+    for field, variable in [('source_background', '--source-bg'), ('source_foreground', '--source-fg')]:
+        color = source_color(getattr(item, field, ''))
+        # A card with no metadata must not inherit another activity's colors.
+        parts.append(f'{variable}:{color or "initial"}')
+    return ';'.join(parts)
+
+
+def _group_style(group, item):
+    """Prefer the first source-colored activity in the spreadsheet's row order."""
+    background = source_color(getattr(item, 'source_background', ''))
+    rank = source_order(item)
+    if background and (group.get('_color_rank') is None or rank < group['_color_rank']):
+        group['style'] = activity_style(item)
+        group['_color_rank'] = rank
+
+
 def source_order(item):
     match=re.search(r'\d+',getattr(item,'source_cell','') or '')
     return int(match.group()) if match else 100000
@@ -34,8 +61,9 @@ def sector_rows(days):
             for item in day[kind]:
                 key=sector_key(item.sector)
                 if key not in groups:
-                    groups[key]={'name':item.sector,'hue':sector_hue(item.sector),'order':source_order(item),'cells':[{'date':d['date'],'shifts':[],'shared':[],'incomplete':[],'count':0} for d in days]}
+                    groups[key]={'name':item.sector,'hue':sector_hue(item.sector),'style':activity_style(item),'_color_rank':None,'order':source_order(item),'cells':[{'date':d['date'],'shifts':[],'shared':[],'incomplete':[],'count':0} for d in days]}
                 group=groups[key];group['order']=min(group['order'],source_order(item))
+                _group_style(group,item)
                 group['cells'][index][kind].append(item)
                 group['cells'][index]['count']+=1
     return sorted(groups.values(),key=lambda group:(group['order'],sector_key(group['name'])))
@@ -44,7 +72,8 @@ def month_sector_groups(shifts):
     grouped={}
     for item in shifts:
         key=sector_key(item.sector)
-        if key not in grouped:grouped[key]={'name':item.sector,'hue':sector_hue(item.sector),'order':source_order(item),'shifts':[]}
+        if key not in grouped:grouped[key]={'name':item.sector,'hue':sector_hue(item.sector),'style':activity_style(item),'_color_rank':None,'order':source_order(item),'shifts':[]}
         grouped[key]['order']=min(grouped[key]['order'],source_order(item))
+        _group_style(grouped[key],item)
         grouped[key]['shifts'].append(item)
     return sorted(grouped.values(),key=lambda group:(group['order'],sector_key(group['name'])))

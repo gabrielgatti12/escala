@@ -19,7 +19,7 @@ from .google_editor import EditorError, SCOPES, encrypt_token
 from .models import SheetsEditorConnection, SheetsWritePilot, SheetsWritePreview, SheetSource, Shift
 from .services import propose_exchange, respond_exchange
 from .sheets import sync_workbook, resident_for
-from .sheets_write import preview_exchange, apply_preview
+from .sheets_write import BLUE_COLOR, FONT_COLOR_FIELD, preview_exchange, apply_preview
 
 
 class Reply:
@@ -57,8 +57,22 @@ class GoogleFixture:
             for request in kwargs['json']['requests']:
                 change=request['updateCells'];region=change['range']
                 cell=self.cell(region['startRowIndex'],region['startColumnIndex'])
-                cell['userEnteredValue']=change['rows'][0]['values'][0]['userEnteredValue']
-                cell['effectiveValue']=cell['userEnteredValue'].copy()
+                value=change['rows'][0]['values'][0]
+                fields=change['fields'].split(',')
+                if 'userEnteredValue' in fields:
+                    cell['userEnteredValue']=copy.deepcopy(value['userEnteredValue'])
+                    cell['effectiveValue']=cell['userEnteredValue'].copy()
+                    cell.pop('textFormatRuns',None)
+                for field in fields:
+                    if field=='userEnteredValue':continue
+                    target=cell;provided=value
+                    parts=field.split('.')
+                    for part in parts[:-1]:
+                        target=target.setdefault(part,{})
+                        provided=provided[part]
+                    target[parts[-1]]=copy.deepcopy(provided[parts[-1]])
+                    if field==FONT_COLOR_FIELD:
+                        cell.setdefault('effectiveFormat',{}).setdefault('textFormat',{})['foregroundColorStyle']=copy.deepcopy(target[parts[-1]])
             return Reply({})
         return Reply(copy.deepcopy(self.data))
 
@@ -95,18 +109,23 @@ class WeeklyWritePilotTests(TestCase):
         self.assertEqual(result.plan['summary'][0]['after'],'Pessoa Dois')
         self.assertTrue(all(call[0]=='GET' for call in self.google.calls))
         self.assertIn('formulaValue',self.google.cell(3,5)['userEnteredValue'])
+        read_fields=self.google.calls[0][2]['params']['fields']
+        for field in ['userEnteredFormat(textFormat)','effectiveFormat(textFormat)','textFormatRuns']:
+            self.assertIn(field,read_fields)
         self.offered.refresh_from_db();self.assertEqual(self.offered.resident_id,self.b.pk)
 
-    def test_single_batch_updates_only_name_values_and_checks_final_result(self):
+    def test_single_batch_updates_only_name_values_and_font_color_and_checks_final_result(self):
         result=apply_preview(self.admin,self.preview().pk)
         self.assertEqual(result.state,'done')
         posts=[c for c in self.google.calls if c[0]=='POST']
         self.assertEqual(len(posts),1)
         writes=posts[0][2]['json']['requests'];self.assertEqual(len(writes),2)
-        self.assertTrue(all(i['updateCells']['fields']=='userEnteredValue' for i in writes))
+        self.assertTrue(all(i['updateCells']['fields']=='userEnteredValue,'+FONT_COLOR_FIELD for i in writes))
         self.assertEqual(self.google.cell(3,5)['effectiveValue'],{'stringValue':'Pessoa Dois'})
         self.assertEqual(self.google.cell(3,12)['effectiveValue'],{'stringValue':'Pessoa Um'})
         self.assertEqual(self.google.cell(3,2)['effectiveValue'],{'stringValue':'8-12'})
+        for column in [5,12]:
+            self.assertEqual(self.google.cell(3,column)['userEnteredFormat']['textFormat']['foregroundColorStyle'],{'rgbColor':BLUE_COLOR})
         with self.assertRaises(EditorError):apply_preview(self.admin,result.pk)
 
     def test_already_applied_is_acknowledged_without_second_write(self):
@@ -115,6 +134,100 @@ class WeeklyWritePilotTests(TestCase):
         result=self.preview();self.assertTrue(result.plan['already_applied'])
         self.assertEqual(apply_preview(self.admin,result.pk).state,'done')
         self.assertEqual(len([c for c in self.google.calls if c[0]=='POST']),previous)
+
+    def test_name_write_changes_only_value_and_foreground_color_preserving_other_formats(self):
+        cell=self.google.cell(3,5)
+        untouched={'backgroundColor':{'red':1,'green':.8,'blue':.3},'borders':{'bottom':{'style':'SOLID'}},
+                   'horizontalAlignment':'CENTER','verticalAlignment':'MIDDLE','wrapStrategy':'WRAP',
+                   'numberFormat':{'type':'TEXT'}}
+        font={'fontFamily':'Calibri','fontSize':11,'bold':True,'italic':True,
+              'foregroundColorStyle':{'rgbColor':{'red':1}}}
+        cell['userEnteredFormat']={**copy.deepcopy(untouched),'textFormat':font}
+        cell['textFormatRuns']=[{'startIndex':0,'format':{'bold':True,'foregroundColor':{'green':1}}}]
+        self.assertEqual(apply_preview(self.admin,self.preview().pk).state,'done')
+        self.assertEqual({key:cell['userEnteredFormat'][key] for key in untouched},untouched)
+        self.assertEqual(cell['userEnteredFormat']['textFormat'],{
+            **font,'foregroundColorStyle':{'rgbColor':BLUE_COLOR}})
+        self.assertNotIn('textFormatRuns',cell)
+
+    def test_new_preview_corrects_only_wrong_font_on_applied_names_preserving_formula(self):
+        first=self.google.cell(3,5);second=self.google.cell(3,12)
+        first['effectiveValue']={'stringValue':'Pessoa Dois'}
+        second['effectiveValue']={'stringValue':'Pessoa Um'}
+        first['userEnteredFormat']={'backgroundColor':{'green':.6},'textFormat':{
+            'fontSize':12,'bold':True,'foregroundColorStyle':{'rgbColor':{'red':0,'green':0,'blue':0}}}}
+        second['userEnteredFormat']={'textFormat':{'foregroundColorStyle':{'rgbColor':BLUE_COLOR.copy()}}}
+        original_value=copy.deepcopy(first['userEnteredValue'])
+        result=self.preview()
+        self.assertTrue(result.plan['already_applied']);self.assertTrue(result.plan['needs_color'])
+        page=self.client.get(reverse('sheets_write_review',args=[result.pk]))
+        self.assertContains(page,'corrige somente a cor da fonte para azul #0000ff')
+        self.assertNotContains(page,'elas serão substituídas')
+        self.assertEqual(apply_preview(self.admin,result.pk).state,'done')
+        writes=[call for call in self.google.calls if call[0]=='POST']
+        self.assertEqual(len(writes),1)
+        updates=writes[0][2]['json']['requests'];self.assertEqual(len(updates),1)
+        update=updates[0]['updateCells']
+        self.assertEqual(update['fields'],FONT_COLOR_FIELD)
+        self.assertNotIn('userEnteredValue',update['rows'][0]['values'][0])
+        self.assertEqual(first['userEnteredValue'],original_value)
+        self.assertEqual(first['effectiveValue'],{'stringValue':'Pessoa Dois'})
+        self.assertEqual(first['userEnteredFormat'],{'backgroundColor':{'green':.6},'textFormat':{
+            'fontSize':12,'bold':True,'foregroundColorStyle':{'rgbColor':BLUE_COLOR}}})
+        done=self.preview();self.assertFalse(done.plan['needs_color'])
+        self.assertEqual(apply_preview(self.admin,done.pk).state,'done')
+        self.assertEqual(len([call for call in self.google.calls if call[0]=='POST']),1)
+
+    def test_color_only_corrects_rich_text_overrides_preserving_every_other_run_property(self):
+        first=self.google.cell(3,5);second=self.google.cell(3,12)
+        first['effectiveValue']={'stringValue':'Pessoa Dois'};second['effectiveValue']={'stringValue':'Pessoa Um'}
+        for cell in [first,second]:
+            cell['userEnteredFormat']={'textFormat':{'foregroundColorStyle':{'rgbColor':BLUE_COLOR.copy()}}}
+        first['textFormatRuns']=[
+            {'startIndex':0,'format':{'foregroundColorStyle':{'rgbColor':{'red':1}},'bold':True,'fontSize':13}},
+            {'startIndex':3,'format':{'foregroundColor':{'red':0},'italic':True,'link':{'uri':'https://example.test'}}},
+            {'startIndex':6,'format':{'underline':True}},
+            {'startIndex':8,'format':{'foregroundColorStyle':{'rgbColor':BLUE_COLOR.copy()},'strikethrough':True}}]
+        original=copy.deepcopy(first['textFormatRuns'])
+        result=self.preview();self.assertTrue(result.plan['needs_color'])
+        self.assertEqual(apply_preview(self.admin,result.pk).state,'done')
+        updates=[call for call in self.google.calls if call[0]=='POST'][0][2]['json']['requests']
+        self.assertEqual(len(updates),1)
+        self.assertEqual(updates[0]['updateCells']['fields'],FONT_COLOR_FIELD+',textFormatRuns')
+        expected=copy.deepcopy(original)
+        for run in expected[:2]:
+            run['format'].pop('foregroundColor',None)
+            run['format']['foregroundColorStyle']={'rgbColor':BLUE_COLOR}
+        self.assertEqual(first['textFormatRuns'],expected)
+        self.assertIn('formulaValue',first['userEnteredValue'])
+        self.assertEqual(apply_preview(self.admin,self.preview().pk).state,'done')
+        self.assertEqual(len([call for call in self.google.calls if call[0]=='POST']),1)
+
+    def test_font_or_rich_text_change_after_preview_blocks_stale_write(self):
+        for field,value in [('userEnteredFormat',{'textFormat':{'foregroundColorStyle':{'rgbColor':{'green':1}}}}),
+                            ('textFormatRuns',[{'startIndex':0,'format':{'bold':True}}])]:
+            with self.subTest(field=field):
+                result=self.preview();self.google.cell(3,5)[field]=value
+                self.assertEqual(apply_preview(self.admin,result.pk).state,'conflict')
+                self.assertFalse(any(call[0]=='POST' for call in self.google.calls))
+
+    def test_unconfirmed_color_marks_send_unknown_then_new_preview_can_correct_only_color(self):
+        request=self.google.request
+        def without_color(method,url,**kwargs):
+            result=request(method,url,**kwargs)
+            if method=='POST':
+                for column in [5,12]:
+                    self.google.cell(3,column).pop('userEnteredFormat',None)
+                    self.google.cell(3,column).pop('effectiveFormat',None)
+            return result
+        result=self.preview()
+        with patch.object(self.google,'request',side_effect=without_color):
+            result=apply_preview(self.admin,result.pk)
+        self.assertEqual(result.state,'unknown');self.assertIn('fonte azul #0000ff',result.message)
+        retry=self.preview();self.assertTrue(retry.plan['already_applied']);self.assertTrue(retry.plan['needs_color'])
+        self.assertEqual(apply_preview(self.admin,retry.pk).state,'done')
+        last=[call for call in self.google.calls if call[0]=='POST'][-1]
+        self.assertTrue(all(change['updateCells']['fields']==FONT_COLOR_FIELD for change in last[2]['json']['requests']))
 
     def test_changed_name_time_date_sector_or_formula_blocks_all_writes(self):
         for coordinate,key,value in [((3,5),'effectiveValue',{'stringValue':'Terceira Pessoa'}),

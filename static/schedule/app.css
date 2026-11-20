@@ -65,3 +65,19 @@ input,select{width:100%;border:1px solid #dfe6e1;background:#fff;color:#345248;b
 .bundle-panel .button{max-width:100%;white-space:normal;margin:5px 0}
 .heading-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 @media(max-width:800px){.bundle-fields,.bundle-columns{grid-template-columns:1fr;gap:14px}.bundle-panel{padding:17px}.heading-actions{justify-content:flex-start}.bundle-consent{font-size:12px}}
+
+/* Imported spreadsheet activity colors take precedence over the fallback hue. */
+.shift-card,.shift-card.own,.shift-card.shared,.shift-card.incomplete{background:var(--source-bg,hsl(var(--sector-hue,150) 55% 96%));border-left-color:var(--source-bg,hsl(var(--sector-hue,150) 38% 58%))}
+.shift-card h3{color:var(--source-fg,#354548)}
+.shift-card .shift-time{color:var(--source-fg,#508974)}
+.shift-card .shared-names,.sector-cell .shift-card .shared-names,.shift-card .resident-name{color:var(--source-fg,#64796b)}
+.shift-card .card-action,.shift-card .card-source{color:var(--source-fg,#508974)}
+.sector-row-label{background:var(--source-bg,hsl(var(--sector-hue) 55% 94%));color:var(--source-fg,#3d4e49)}
+.sector-row-label h3{color:inherit}
+.sector-dot{background:var(--source-fg,hsl(var(--sector-hue) 38% 58%))}
+.month-sector{background:var(--source-bg,hsl(var(--sector-hue) 55% 95%));color:var(--source-fg,#43584c);border-left-color:var(--source-bg,hsl(var(--sector-hue) 38% 58%))}
+.month-sector h3,.month-sector .month-event strong,.month-sector .month-event span:not(.badge){color:inherit}
+.month-sector .month-event{background:var(--source-bg,transparent);color:var(--source-fg,inherit)}
+.activity-notes{font-size:10px;line-height:1.6;margin:8px 0;padding-top:6px;border-top:1px solid currentColor;overflow-wrap:anywhere;color:var(--source-fg,#43584c)}
+.activity-notes strong{font-size:9px;font-weight:650}
+.month-event .activity-notes{font-size:9px;margin:5px 0}

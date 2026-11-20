@@ -9,5 +9,5 @@
     {% include 'components/incomplete_cards.html' with items=day.incomplete %}
     {% if not day.count %}<div class="empty-day"><span>{% include 'components/icon.html' with name='calendar' %}</span><p>{% if day.weekend %}Sem atividades<br>na planilha{% else %}Sem atividades<br>neste filtro{% endif %}</p></div>{% endif %}
   </div></div>{% endfor %}
-  </div></div>{% endif %}<div class="board-footer"><div class="legend"><span>Cores pastéis identificam os setores</span><span>Rótulos indicam duplas, descanso e horários pendentes</span></div><span class="mobile-hint">Deslize para ver os outros dias →</span></div>
+  </div></div>{% endif %}<div class="board-footer"><div class="legend"><span>Cores da planilha identificam as atividades</span><span>Rótulos indicam duplas, descanso e horários pendentes</span></div><span class="mobile-hint">Deslize para ver os outros dias →</span></div>
 </section>

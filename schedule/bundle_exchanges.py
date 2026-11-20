@@ -60,7 +60,7 @@ def _record(shift):
     return {'id':shift.pk,'resident_id':shift.resident_id,'resident_name':_name(shift.resident),
             'starts_at':start.isoformat(),'ends_at':end.isoformat(),'date':start.date().isoformat(),
             'date_label':start.strftime('%d/%m/%Y'),'start_label':start.strftime('%H:%M'),'end_label':end.strftime('%H:%M'),
-            'sector':shift.sector,'display_sector':sector_label(shift.sector),
+            'sector':shift.sector,'display_sector':sector_label(shift.sector),'notes':shift.notes,
             'source':shift.source,'source_tab':shift.source_tab,'source_cell':shift.source_cell,
             'category':shift.category,'active':shift.active,'requires_reconciliation':shift.requires_reconciliation,
             'minutes':_duration(shift),'hours_label':_hours(_duration(shift))}

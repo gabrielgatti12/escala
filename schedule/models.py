@@ -24,6 +24,9 @@ class Shift(models.Model):
     starts_at = models.DateTimeField()
     ends_at = models.DateTimeField()
     sector = models.CharField(max_length=120)
+    source_background = models.CharField(max_length=7, blank=True, default='')
+    source_foreground = models.CharField(max_length=7, blank=True, default='')
+    notes = models.TextField(blank=True, default='')
     class Meta:
         ordering = ['starts_at']
         indexes = [
@@ -47,9 +50,10 @@ class Exchange(models.Model):
     requested = models.ForeignKey(Shift,on_delete=models.PROTECT,related_name='requests')
     proposer = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,related_name='proposals')
     recipient = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,related_name='received_proposals')
-    status = models.CharField(max_length=12,choices=[('pending','Aguardando confirmação'),('accepted','Aceita'),('rejected','Recusada'),('cancelled','Cancelada')],default='pending')
+    status = models.CharField(max_length=12,choices=[('pending','Aguardando confirmação'),('accepted','Aceita'),('rejected','Recusada'),('cancelled','Cancelada'),('reverted','Desfeita na planilha')],default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
     resolved_at = models.DateTimeField(null=True,blank=True)
+    source_reverted_at = models.DateTimeField(null=True,blank=True)
     @property
     def is_expired(self):
         return self.status=='pending' and min(self.offered.starts_at,self.requested.starts_at)<=timezone.now()
@@ -87,6 +91,9 @@ class SharedActivity(models.Model):
     starts_at = models.DateTimeField()
     ends_at = models.DateTimeField()
     sector = models.CharField(max_length=120)
+    source_background = models.CharField(max_length=7, blank=True, default='')
+    source_foreground = models.CharField(max_length=7, blank=True, default='')
+    notes = models.TextField(blank=True, default='')
     @property
     def source_url(self):
         return f"https://docs.google.com/spreadsheets/d/{self.source}/edit?range="+quote("'"+self.source_tab.replace("'","''")+"'!"+self.source_cell) if self.source and self.source_cell else ''
@@ -109,7 +116,7 @@ class Allocation(models.Model):
     recipient = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,related_name='allocation_inbox')
     mine = models.ForeignKey(SharedActivity,on_delete=models.PROTECT,related_name='mine_proposals')
     theirs = models.ForeignKey(SharedActivity,on_delete=models.PROTECT,related_name='their_proposals')
-    status = models.CharField(max_length=12,choices=Exchange._meta.get_field('status').choices,default='pending')
+    status = models.CharField(max_length=12,choices=[choice for choice in Exchange._meta.get_field('status').choices if choice[0]!='reverted'],default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
     resolved_at = models.DateTimeField(null=True,blank=True)
     @property
@@ -132,6 +139,9 @@ class IncompleteActivity(models.Model):
     date = models.DateField()
     residents = models.ManyToManyField(settings.AUTH_USER_MODEL)
     sector = models.CharField(max_length=120)
+    source_background = models.CharField(max_length=7, blank=True, default='')
+    source_foreground = models.CharField(max_length=7, blank=True, default='')
+    notes = models.TextField(blank=True, default='')
     raw_time = models.CharField(max_length=100,blank=True)
     class Meta:
         ordering=['date','sector']
@@ -259,7 +269,7 @@ class SheetsWritePreview(models.Model):
     source = models.ForeignKey(SheetSource, on_delete=models.PROTECT)
     plan = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
-    state = models.CharField(max_length=20, default='preview', choices=[('preview','Aguardando conferência'),('writing','Enviando'),('done','Gravada'),('conflict','Conferir divergência'),('unknown','Resultado a conferir')])
+    state = models.CharField(max_length=20, default='preview', choices=[('preview','Aguardando conferência'),('writing','Enviando'),('done','Gravada'),('reverted','Desfeita na planilha'),('conflict','Conferir divergência'),('unknown','Resultado a conferir')])
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     message = models.CharField(max_length=250, blank=True)
@@ -285,6 +295,7 @@ class BundleExchange(models.Model):
     fingerprint = models.CharField(max_length=64)
     created_at = models.DateTimeField(auto_now_add=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
+    source_reverted_at = models.DateTimeField(null=True, blank=True)
     proposer_acknowledged_at = models.DateTimeField()
     recipient_acknowledged_at = models.DateTimeField(null=True, blank=True)
     shifts = models.ManyToManyField(Shift, through='BundleExchangeItem', related_name='bundle_exchanges')
@@ -313,3 +324,17 @@ class BundleExchangeItem(models.Model):
     class Meta:
         ordering = ['side','shift__starts_at','pk']
         constraints = [models.UniqueConstraint(fields=['exchange','shift'],name='bundle_unique_shift')]
+
+
+class SheetsSourceCheck(models.Model):
+    """Audit of an authenticated, read-only check of a previously confirmed write."""
+    preview = models.ForeignKey(SheetsWritePreview, on_delete=models.PROTECT, related_name='source_checks')
+    account = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    status = models.CharField(max_length=20, choices=[('current','Troca mantida na planilha'),('reverted','Desfeita na planilha'),('conflict','Conferir divergência'),('unavailable','Não foi possível conferir')])
+    message = models.CharField(max_length=250)
+    restored_shift_ids = models.JSONField(default=list)
+    source_digest = models.CharField(max_length=64, blank=True)
+    verified_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-verified_at', '-pk']

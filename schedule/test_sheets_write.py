@@ -109,10 +109,40 @@ class WeeklyWritePilotTests(TestCase):
         self.assertEqual(result.plan['summary'][0]['after'],'Pessoa Dois')
         self.assertTrue(all(call[0]=='GET' for call in self.google.calls))
         self.assertIn('formulaValue',self.google.cell(3,5)['userEnteredValue'])
-        read_fields=self.google.calls[0][2]['params']['fields']
+        read_fields=self.google.calls[1][2]['params']['fields']
+        self.assertNotIn('Format',self.google.calls[0][2]['params']['fields'])
+        self.assertEqual(self.google.calls[1][2]['params']['ranges'],["'Espelho Semanal'!F4","'Espelho Semanal'!M4"])
         for field in ['userEnteredFormat(textFormat)','effectiveFormat(textFormat)','textFormatRuns']:
             self.assertIn(field,read_fields)
         self.offered.refresh_from_db();self.assertEqual(self.offered.resident_id,self.b.pk)
+
+    def test_large_whole_sheet_format_is_never_requested_for_preview_or_undo(self):
+        original_request=self.google.request
+        def bounded_request(method,url,**kwargs):
+            params=kwargs.get('params',{})
+            if method=='GET' and 'Format' in params.get('fields',''):
+                self.assertIsInstance(params['ranges'],list)
+                self.assertEqual(len(params['ranges']),2)
+                self.assertTrue(all('!' in region for region in params['ranges']))
+            return original_request(method,url,**kwargs)
+        with patch.object(self.google,'request',side_effect=bounded_request):
+            self.assertEqual(apply_preview(self.admin,self.preview().pk).state,'done')
+        from .sheets_write import _read_book
+        self.google.calls.clear()
+        _read_book(self.google,self.source)
+        self.assertEqual(len(self.google.calls),1)
+        self.assertNotIn('Format',self.google.calls[0][2]['params']['fields'])
+
+    def test_sparse_format_response_offsets_attach_only_to_reviewed_names(self):
+        values=copy.deepcopy(self.google.data)
+        formats={'sheets':[{'properties':{'sheetId':7,'title':'Espelho Semanal'},'data':[
+            {'startRow':3,'startColumn':5,'rowData':[{'values':[{'userEnteredFormat':{'textFormat':{'foregroundColorStyle':{'rgbColor':BLUE_COLOR}}}}]}]},
+            {'startRow':3,'startColumn':12,'rowData':[{'values':[{'userEnteredFormat':{'textFormat':{'foregroundColorStyle':{'rgbColor':{'red':1}}}}}]}]},
+        ]}]}
+        with patch('schedule.sheets_write._request_json',side_effect=[values,formats]):
+            preview=self.preview()
+        self.assertEqual([cell['font_is_blue'] for cell in preview.plan['cells']],[True,False])
+        self.assertTrue(preview.plan['needs_color'])
 
     def test_single_batch_updates_only_name_values_and_font_color_and_checks_final_result(self):
         result=apply_preview(self.admin,self.preview().pk)

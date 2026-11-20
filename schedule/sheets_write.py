@@ -134,7 +134,7 @@ def _request_json(session,method,url,**kwargs):
 
 
 def _read_book(session,source):
-    fields='sheets(properties(sheetId,title,gridProperties),merges,data(startRow,startColumn,rowData(values(userEnteredValue,effectiveValue,formattedValue,userEnteredFormat(textFormat),effectiveFormat(textFormat),textFormatRuns))))'
+    fields='sheets(properties(sheetId,title,gridProperties),merges,data(startRow,startColumn,rowData(values(userEnteredValue,effectiveValue))))'
     payload=_request_json(session,'GET',API+source.spreadsheet_id,params={'ranges':"'Espelho Semanal'",'includeGridData':'true','fields':fields})
     sheets=[s for s in payload.get('sheets',[]) if s.get('properties',{}).get('title')==TAB]
     if len(sheets)!=1:raise EditorError('A aba Espelho Semanal não foi encontrada na fonte.')
@@ -147,6 +147,24 @@ def _read_book(session,source):
                 cells[row_index,column]=value
                 if len(cells)>2_000_000:raise EditorError('A aba excede o limite deste teste.')
     return sheet,cells
+
+
+def _read_name_formats(session,source,sheet,cells,slots):
+    # Formatting on a whole weekly mirror can exceed 20 MB even when its values
+    # are small. Read fonts only for the reviewed, occupied name cells.
+    targets={(cell['row']+1,cell['column']+1) for slot,_,_,_ in slots for cell in slot['cells']}
+    ranges=[f"'{TAB}'!{get_column_letter(column)}{row}" for row,column in sorted(targets)]
+    fields='sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(userEnteredFormat(textFormat),effectiveFormat(textFormat),textFormatRuns))))'
+    payload=_request_json(session,'GET',API+source.spreadsheet_id,params={'ranges':ranges,'includeGridData':'true','fields':fields})
+    matches=[item for item in payload.get('sheets',[]) if item.get('properties',{}).get('sheetId')==sheet['properties']['sheetId'] and item.get('properties',{}).get('title')==TAB]
+    if len(matches)!=1:raise EditorError('A aba mudou durante a leitura das fontes. Prepare outra conferência.')
+    for block in matches[0].get('data',[]):
+        for row,row_data in enumerate(block.get('rowData',[]),block.get('startRow',0)+1):
+            for column,value in enumerate(row_data.get('values',[]),block.get('startColumn',0)+1):
+                if (row,column) in targets:
+                    target=cells[row,column]
+                    for field in ['userEnteredFormat','effectiveFormat','textFormatRuns']:
+                        if field in value:target[field]=value[field]
 
 
 def _value(cells,row,col):
@@ -270,6 +288,9 @@ def make_plan(exchange,session,account):
     source,connection=_eligible(exchange,account)
     sheet,cells=_read_book(session,source)
     entries=_entries(exchange)
+    slots=[(_slot(sheet,cells,shift,old_owner,new_owner),old_owner,new_owner,side)
+           for shift,old_owner,new_owner,side in entries]
+    _read_name_formats(session,source,sheet,cells,slots)
     slots=[(_slot(sheet,cells,shift,old_owner,new_owner),old_owner,new_owner,side)
            for shift,old_owner,new_owner,side in entries]
     states={item['state'] for item,_,_,_ in slots}

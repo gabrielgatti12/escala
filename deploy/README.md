@@ -1,5 +1,9 @@
 # Implantação na instância Oracle
 
+## Ajuste de layout e diagnóstico de reversão
+
+Esta atualização corrige a leitura Google acima de 20 MB causada pela formatação de toda a aba: confere a reversão somente pelos valores e consulta estilos apenas nas células de nomes envolvidas. Após atualizar e reconstruir os serviços usando os comandos abaixo, abra **Planilhas e fontes → Conferir trocas agora**. O botão funciona durante importações e mostra os motivos das dez conferências mais recentes. Para uma falha de renovação/HTTP 401, reconecte sua conta em **Testar gravação no Google** e confira novamente. Para HTTP 403, confira acesso ao arquivo e Google Sheets API. Nenhuma titularidade é restaurada quando o Google não pôde ser lido.
+
 ## Atualização de cores, observações e reversões manuais
 
 Esta versão exige as migrações **0021 e 0022**. Preserve as credenciais e o volume do banco e execute na instalação existente:
@@ -13,7 +17,7 @@ bash scripts/oracle-compose.sh run --rm web python manage.py migrate --noinput &
 bash scripts/oracle-compose.sh up -d
 ```
 
-Depois entre como o administrador que conectou o Google e clique **Planilhas e fontes → Atualizar agora**. A conferência OAuth de trocas previamente gravadas reconhece uma reversão completa dos nomes originais; o trabalhador importa em seguida as cores dos setores e observações. Confira as mensagens e o resumo das fontes. Se a conexão expirou, reconecte a conta Google em **Testar gravação no Google** e solicite a atualização outra vez. A leitura diária por chave pública não substitui a conferência OAuth de uma reversão.
+Depois entre como administrador com sua própria conexão Google ativa e clique **Planilhas e fontes → Atualizar agora**. A conferência OAuth de trocas previamente gravadas reconhece uma reversão completa dos nomes originais; o trabalhador importa em seguida as cores dos setores e observações. Confira as mensagens e o resumo das fontes. Se a conexão expirou, reconecte a conta Google em **Testar gravação no Google** e solicite a atualização outra vez. A leitura diária por chave pública não substitui a conferência OAuth de uma reversão.
 
 A nova prévia de uma troca aceita que já esteja gravada pode corrigir a fonte para **#0000ff** sem regravar os nomes. Essa correção exige sua confirmação; a atualização do aplicativo e a sincronização não recolorem nomes na origem automaticamente. Nenhum desses testes locais comprova implantação na Oracle.
 

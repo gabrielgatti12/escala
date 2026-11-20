@@ -239,6 +239,21 @@ class ConfirmedSingleReversalTests(TestCase):
         self.assertFalse(Shift.objects.filter(requires_reconciliation=True).exists())
         self.assertFalse(SheetsSourceCheck.objects.filter(message__contains='SECRET').exists())
 
+    def test_failed_google_read_records_safe_actionable_reason_without_exception_body(self):
+        self.confirmed()
+        from requests import HTTPError
+        from types import SimpleNamespace
+        previous=self.owners()
+        for status,expected in [(400,'HTTP 400'),(401,'Reconecte'),(403,'HTTP 403'),(429,'limite')]:
+            error=HTTPError('SECRET token-body https://private.invalid',response=SimpleNamespace(status_code=status))
+            with self.subTest(status=status), patch.object(self.google,'request',side_effect=error):
+                result=reconcile_confirmed_writes(self.admin)
+            self.assertEqual(result.unavailable,1)
+            audit=SheetsSourceCheck.objects.first()
+            self.assertIn(expected,audit.message)
+            self.assertNotIn('SECRET',audit.message)
+            self.assertEqual(self.owners(),previous)
+
     def test_older_single_plan_without_bundle_fields_can_be_reconciled(self):
         preview = self.confirmed()
         plan = copy.deepcopy(preview.plan)
@@ -294,6 +309,34 @@ class ConfirmedSingleReversalTests(TestCase):
         self.assertEqual(reconcile_confirmed_writes(self.a).unavailable, 0)
         self.assertEqual(self.owners(), previous)
         self.assertFalse(self.google.calls)
+
+    def test_current_administrator_can_check_history_with_their_own_google_connection(self):
+        self.confirmed()
+        self.original_names()
+        SheetsEditorConnection.objects.update(connected_by=self.other_admin)
+        with patch('schedule.sheets_reconciliation.authorized_session',return_value=self.google) as session:
+            result=reconcile_confirmed_writes(self.other_admin)
+        session.assert_called_once_with(self.other_admin)
+        self.assertEqual(result.reverted,1)
+        self.exchange.refresh_from_db()
+        self.assertEqual(self.exchange.status,'reverted')
+        self.assertEqual(SheetsSourceCheck.objects.get().account_id,self.other_admin.pk)
+        self.assertTrue(all(call[0]=='GET' for call in self.google.calls))
+
+    def test_independent_check_works_during_queued_import_and_shows_reason(self):
+        self.confirmed()
+        self.google.cell(3,5)['effectiveValue']={'stringValue':'Pessoa Um'}
+        heartbeat,_=SyncHeartbeat.objects.get_or_create()
+        heartbeat.refresh_requested_at=timezone.now()
+        heartbeat.save()
+        requested_at=heartbeat.refresh_requested_at
+        response=self.client.post(reverse('request_source_refresh'),{'check_only':'yes'},follow=True)
+        self.assertContains(response,'A planilha desfez apenas parte da troca')
+        self.assertContains(response,'Conferir trocas agora')
+        heartbeat.refresh_from_db()
+        self.assertEqual(heartbeat.refresh_requested_at,requested_at)
+        self.exchange.refresh_from_db()
+        self.assertEqual(self.exchange.status,'accepted')
 
     def test_only_latest_confirmed_preview_is_checked_once_per_decision(self):
         self.confirmed()

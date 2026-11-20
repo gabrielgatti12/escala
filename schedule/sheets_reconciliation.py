@@ -241,6 +241,25 @@ def _restore(preview, account, digest):
         )
 
 
+def _read_failure_message(error):
+    # Application errors are controlled messages; never display transport bodies,
+    # URLs, OAuth payloads or arbitrary exception text.
+    if isinstance(error, EditorError):
+        return str(error)[:250]
+    status=getattr(getattr(error,'response',None),'status_code',None)
+    messages={
+        400:'O Google recusou a consulta à planilha (HTTP 400). A leitura precisa ser corrigida; nomes locais preservados.',
+        401:'A conexão Google expirou ou foi revogada (HTTP 401). Reconecte a conta Google e confira novamente.',
+        403:'O Google negou a leitura (HTTP 403). Confira o acesso à planilha e a Google Sheets API no projeto.',
+        404:'A planilha não foi encontrada pela conta Google conectada (HTTP 404). Confira o acesso ao arquivo.',
+        429:'O limite de consultas do Google foi atingido (HTTP 429). Aguarde e tente conferir novamente.',
+    }
+    if status in messages:return messages[status]
+    if type(error).__name__ in ['RefreshError','TransportError']:
+        return 'Não foi possível renovar a conexão Google. Reconecte sua conta Google e confira novamente.'
+    return 'Falha de comunicação ao ler o Google. Tente novamente; nomes locais preservados.'
+
+
 def reconcile_confirmed_writes(account):
     """Run only for an admin POST; perform authenticated GETs, never remote writes."""
     result = SourceCheckResult()
@@ -251,14 +270,16 @@ def reconcile_confirmed_writes(account):
     reverted = Q(state='reverted') & (Q(exchange__status='reverted') | Q(bundle__status='reverted')) & (
         Q(exchange__offered_id__in=pending) | Q(exchange__requested_id__in=pending) | Q(bundle__items__shift_id__in=pending))
     rows = SheetsWritePreview.objects.filter(accepted | reverted).select_related('source').distinct().order_by('-completed_at', '-pk')
-    # The connection belongs to one login; other admins must not borrow its token.
+    # Always use the requesting administrator's own Google authorization.
+    # Historical previews may belong to a different admin; reading them does not
+    # grant access to that admin's token or to a sheet this Google account cannot read.
     connection = SheetsEditorConnection.objects.filter(key='pilot', connected_by=account).first()
     if not connection:
         result.unavailable = rows.count()
         return result
     grouped = defaultdict(list)
     seen = set()
-    for preview in rows.filter(account=account):
+    for preview in rows:
         key = ('bundle', preview.bundle_id) if preview.bundle_id else ('single', preview.exchange_id)
         if key in seen:
             continue
@@ -272,10 +293,10 @@ def reconcile_confirmed_writes(account):
                 source = previews[0].source
                 try:
                     sheet, cells = _read_book(session, source)
-                except Exception:
+                except Exception as error:
                     # OAuth/transport errors can include secrets: never echo their text.
                     for preview in previews:
-                        _audit(preview, account, 'unavailable', 'Não foi possível conferir a fonte Google; titularidades locais preservadas.')
+                        _audit(preview, account, 'unavailable', _read_failure_message(error))
                     result.unavailable += len(previews)
                     continue
                 for preview in previews:

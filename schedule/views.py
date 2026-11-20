@@ -89,7 +89,10 @@ def dashboard(request,account_form=None):
     allocation_eligible_ids={option['activity'].pk for option in allocation_options}
     my_shared=[option['activity'] for option in allocation_options]
     source_cards=[]
+    sheets_checks=[]
     if tab=='sources':
+        from .models import SheetsSourceCheck
+        sheets_checks=SheetsSourceCheck.objects.select_related('preview__source').order_by('-verified_at','-pk')[:10]
         states={state.source:state for state in SyncState.objects.all()}
         totals={item['source']:item['total'] for item in active.order_by().values('source').annotate(total=Count('pk'))}
         for source in SheetSource.objects.select_related('folder').all().order_by('name','pk'):
@@ -131,7 +134,7 @@ def dashboard(request,account_form=None):
         'offered':[],'requested':[],'bounds':bounds,
         'exchanges':displayed_exchanges[:100],'recent_exchanges':exchanges[:4],'allocations':displayed_allocations[:100],'my_shared':my_shared,'allocation_options':allocation_options,'allocation_eligible_ids':allocation_eligible_ids,
         'bundles':displayed_bundles[:100] if tab=='requests' else [],'incoming_bundles':pending_bundles.filter(recipient=person)[:4],
-        'latest_sync':SyncState.objects.filter(last_success__isnull=False).order_by('-last_success').first(),'source_cards':source_cards,'drive_folders':DriveFolder.objects.all() if request.user.is_superuser else [],'sync_health':sync_health_status,
+        'latest_sync':SyncState.objects.filter(last_success__isnull=False).order_by('-last_success').first(),'source_cards':source_cards,'sheets_checks':sheets_checks,'drive_folders':DriveFolder.objects.all() if request.user.is_superuser else [],'sync_health':sync_health_status,
     })
 @login_required
 @require_POST

@@ -66,18 +66,37 @@ input,select{width:100%;border:1px solid #dfe6e1;background:#fff;color:#345248;b
 .heading-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 @media(max-width:800px){.bundle-fields,.bundle-columns{grid-template-columns:1fr;gap:14px}.bundle-panel{padding:17px}.heading-actions{justify-content:flex-start}.bundle-consent{font-size:12px}}
 
-/* Imported spreadsheet activity colors take precedence over the fallback hue. */
-.shift-card,.shift-card.own,.shift-card.shared,.shift-card.incomplete{background:var(--source-bg,hsl(var(--sector-hue,150) 55% 96%));border-left-color:var(--source-bg,hsl(var(--sector-hue,150) 38% 58%))}
-.shift-card h3{color:var(--source-fg,#354548)}
-.shift-card .shift-time{color:var(--source-fg,#508974)}
-.shift-card .shared-names,.sector-cell .shift-card .shared-names,.shift-card .resident-name{color:var(--source-fg,#64796b)}
-.shift-card .card-action,.shift-card .card-source{color:var(--source-fg,#508974)}
-.sector-row-label{background:var(--source-bg,hsl(var(--sector-hue) 55% 94%));color:var(--source-fg,#3d4e49)}
+/* Source colors identify activities through accents, with a neutral reading surface. */
+.shift-card,.shift-card.own,.shift-card.shared,.shift-card.incomplete{background:#fff;border:1px solid #e2e8e6;border-left:4px solid var(--source-bg,hsl(var(--sector-hue,150) 38% 58%));border-radius:10px;padding:15px 13px 10px;box-shadow:0 2px 7px #153c3005}
+.shift-card h3{color:#263c38;font-size:12px;line-height:1.65;margin:9px 0}
+.shift-card .shift-time{color:#536b64;font-size:11px;font-weight:600}
+.shift-card .shared-names,.sector-cell .shift-card .shared-names,.shift-card .resident-name{color:#63776f}
+.shift-card .card-action,.shift-card .card-source{color:#286c61}
+.shift-card .card-actions{border-top:1px solid #edf1ef;margin-top:12px;padding-top:8px;display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:5px 8px;align-items:center}
+.shift-card .card-action{line-height:1.5;font-weight:500}
+.shift-card .card-actions>.icon-action{grid-column:2;grid-row:1}
+.shift-card .card-actions>.card-source{grid-column:3;grid-row:1}
+.shift-card .card-actions>a:not(.card-source){grid-column:1/-1;grid-row:2;text-align:left}
+.sector-row-label{background:#f9fbfa;color:#30483e;border-right:1px solid #e2e8e6;border-left:4px solid var(--source-bg,hsl(var(--sector-hue) 38% 58%))}
 .sector-row-label h3{color:inherit}
-.sector-dot{background:var(--source-fg,hsl(var(--sector-hue) 38% 58%))}
-.month-sector{background:var(--source-bg,hsl(var(--sector-hue) 55% 95%));color:var(--source-fg,#43584c);border-left-color:var(--source-bg,hsl(var(--sector-hue) 38% 58%))}
+.sector-dot{background:var(--source-bg,hsl(var(--sector-hue) 38% 58%));border:1px solid #183e3020;width:10px;height:10px}
+.sector-cell{background:#fafcfb}
+.month-sector{background:#fff;color:#30483e;border:1px solid #e2e8e6;border-left:4px solid var(--source-bg,hsl(var(--sector-hue) 38% 58%));padding:10px}
 .month-sector h3,.month-sector .month-event strong,.month-sector .month-event span:not(.badge){color:inherit}
-.month-sector .month-event{background:var(--source-bg,transparent);color:var(--source-fg,inherit)}
-.activity-notes{font-size:10px;line-height:1.6;margin:8px 0;padding-top:6px;border-top:1px solid currentColor;overflow-wrap:anywhere;color:var(--source-fg,#43584c)}
-.activity-notes strong{font-size:9px;font-weight:650}
-.month-event .activity-notes{font-size:9px;margin:5px 0}
+.month-sector .month-event{background:#fff;color:#52685f;border-top:1px solid #edf1ef}
+.activity-notes{font-size:11px;line-height:1.65;margin:10px 0;padding:8px 10px;background:#f5f8f6;border-radius:6px;overflow-wrap:anywhere;color:#53685f}
+.activity-notes strong{font-size:10px;font-weight:650}
+.month-event .activity-notes{font-size:10px;margin:5px 0}
+.sheet-checks{padding:22px;margin-bottom:24px}
+.sheet-checks>p{font-size:12px;line-height:1.8;margin:10px 0 16px;color:#63776f}
+.sheet-check{padding:14px 0;border-top:1px solid #e2e8e6;font-size:12px;line-height:1.7}
+.sheet-check small{display:block;color:#74877f}
+.sheet-check p{margin-top:5px}
+@media(max-width:600px){
+ .week-grid{grid-template-columns:repeat(7,calc(100vw - 76px));min-width:0;width:max-content}
+ .calendar-scroll{scroll-snap-type:x proximity}
+ .week-grid>.day-column{scroll-snap-align:start}
+ .day-content{padding:12px;min-height:220px;max-height:none;overflow-y:visible}
+ .shift-card h3{font-size:13px}
+ .shift-card .card-action{font-size:11px}
+}

@@ -69,11 +69,15 @@ def sector_rows(days):
     return sorted(groups.values(),key=lambda group:(group['order'],sector_key(group['name'])))
 
 def month_sector_groups(shifts):
-    grouped={}
-    for item in shifts:
+    """Chronological daily entries; group only consecutive matching sectors."""
+    groups=[]
+    ordered=sorted(shifts,key=lambda item:(item.starts_at,item.ends_at,sector_key(item.sector),item.pk or 0))
+    for item in ordered:
         key=sector_key(item.sector)
-        if key not in grouped:grouped[key]={'name':item.sector,'hue':sector_hue(item.sector),'style':activity_style(item),'_color_rank':None,'order':source_order(item),'shifts':[]}
-        grouped[key]['order']=min(grouped[key]['order'],source_order(item))
-        _group_style(grouped[key],item)
-        grouped[key]['shifts'].append(item)
-    return sorted(grouped.values(),key=lambda group:(group['order'],sector_key(group['name'])))
+        if not groups or sector_key(groups[-1]['name'])!=key:
+            groups.append({'name':item.sector,'hue':sector_hue(item.sector),'style':activity_style(item),'_color_rank':None,'order':source_order(item),'shifts':[]})
+        group=groups[-1]
+        group['order']=min(group['order'],source_order(item))
+        _group_style(group,item)
+        group['shifts'].append(item)
+    return groups

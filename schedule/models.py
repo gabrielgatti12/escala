@@ -235,3 +235,30 @@ class LoginAttempt(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=['window_started'], name='login_attempt_expiry')]
+
+
+class SheetsEditorConnection(models.Model):
+    key = models.CharField(max_length=20, primary_key=True, default='pilot')
+    email = models.EmailField()
+    encrypted_refresh_token = models.TextField()
+    connected_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    connected_at = models.DateTimeField(auto_now=True)
+
+
+class SheetsWritePilot(models.Model):
+    key = models.CharField(max_length=20, primary_key=True, default='pilot')
+    source = models.ForeignKey(SheetSource, on_delete=models.PROTECT)
+    enabled = models.BooleanField(default=False)
+    configured_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+
+
+class SheetsWritePreview(models.Model):
+    exchange = models.ForeignKey(Exchange, on_delete=models.PROTECT)
+    account = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    source = models.ForeignKey(SheetSource, on_delete=models.PROTECT)
+    plan = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    state = models.CharField(max_length=20, default='preview', choices=[('preview','Aguardando conferência'),('writing','Enviando'),('done','Gravada'),('conflict','Conferir divergência'),('unknown','Resultado a conferir')])
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    message = models.CharField(max_length=250, blank=True)

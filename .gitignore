@@ -9,3 +9,6 @@ staticfiles/
 deploy/.env
 deploy/google-service-account.json
 deploy/google-drive-api-key.txt
+
+deploy/google-sheets-oauth-client.json
+deploy/google-sheets-token-key.txt

@@ -47,11 +47,11 @@ Colunas: `id,residente,inicio,fim,setor`. `residente` é o nome de usuário de u
 
 ## Limites e implantação
 
-O ambiente preparado é de desenvolvimento. Antes de disponibilizar a residentes: confirmar restrições de troca entre grupos, provisionar contas, definir política de aprovação institucional e preparar hospedagem HTTPS, banco persistente, backups e servidor WSGI/ASGI de produção. O SQLite atende desenvolvimento; recomenda-se PostgreSQL para produção e validação adicional de concorrência. Não há escrita de volta na planilha nem notificações por email/WhatsApp nesta versão.
+O ambiente preparado é de desenvolvimento. Antes de disponibilizar a residentes: confirmar restrições de troca entre grupos, provisionar contas, definir política de aprovação institucional e preparar hospedagem HTTPS, banco persistente, backups e servidor WSGI/ASGI de produção. O SQLite atende desenvolvimento; recomenda-se PostgreSQL para produção e validação adicional de concorrência. A escrita em Sheets está restrita ao piloto administrativo descrito abaixo; não há notificações por email/WhatsApp.
 
 Para produção, `DJANGO_DEBUG=0`, `DJANGO_SECRET_KEY` forte e `DJANGO_ALLOWED_HOSTS` são obrigatórios. `DATABASE_PATH` permite escolher o arquivo SQLite. Não exponha o servidor de desenvolvimento publicamente.
 
-A dupla decide a divisão entre si, pelo fluxo de proposta e aceite no aplicativo. Não há decisão automática baseada na posição dos nomes. O calendário final é a visão `/calendario/` do aplicativo. A exportação `/calendario.ics` é um arquivo estático. Em Google Calendário, o usuário pode gerar uma assinatura privada que reflete os plantões definidos e pode ser revogada. O Google decide quando reler o link; o painel continua sendo a referência imediata. Não há escrita nas planilhas Google Sheets.
+A dupla decide a divisão entre si, pelo fluxo de proposta e aceite no aplicativo. Não há decisão automática baseada na posição dos nomes. O calendário final é a visão `/calendario/` do aplicativo. A exportação `/calendario.ics` é um arquivo estático. Em Google Calendário, o usuário pode gerar uma assinatura privada que reflete os plantões definidos e pode ser revogada. O Google decide quando reler o link; o painel continua sendo a referência imediata. O piloto de escrita de trocas aceitas na semana de 23–29/11/2026 exige conexão Google e conferência administrativa; as demais fontes continuam somente leitura.
 
 ## Interface e cadastro de novas semanas
 
@@ -119,7 +119,7 @@ A interface consulta o SQLite local. A leitura automática das planilhas agora o
 
 Para instalações existentes, altere o intervalo com `bash scripts/set-sync-interval.sh 86400` antes de recriar o serviço; um `SYNC_INTERVAL=300` já salvo não muda só com a atualização do código. O comando `python manage.py sync_status` e a tela de fontes mostram o último contato, progresso, falhas e próxima tentativa prevista.
 
-A gravação nas planilhas originais aguarda permissão de editor e credencial Google de escrita. A chave de API pública configurada serve à leitura; as decisões continuam preservadas no banco. A integração da cobertura do pós-plantão fica para uma etapa posterior.
+A gravação automática ampla continua fora do escopo. Há um piloto manual para 23–29/11/2026, com permissão de editor e conexão OAuth Google; veja a seção de teste abaixo. A chave de API pública configurada serve à leitura; as decisões continuam preservadas no banco. A integração da cobertura do pós-plantão fica para uma etapa posterior.
 
 Na etapa de calendário, avisos e leitura diária, 179 testes passaram, incluindo assinatura privada, CSRF, avisos por residente, leitura diária e atualização manual. O navegador validou geração/revogação de assinatura, antes/depois e lembretes no celular com dados fictícios. A inclusão do link em uma conta Google é feita pelo próprio residente; o Google controla quando relê a assinatura. A implantação na Oracle e o ajuste do proxy estão descritos em `deploy/README.md`.
 
@@ -137,7 +137,7 @@ O SQLite mantém a cópia local usada pela interface. Essa fonte participa da le
 
 As identidades dos slots independem do nome do residente e da posição física da linha. As cinderelas já importadas mantêm os IDs dos eventos. Meses com datas, fórmulas sem cache, horários ou nomes sem associação segura preservam os registros anteriores com aviso. Abas ausentes ou duplicadas para o mesmo mês também exigem conferência, sem apagar silenciosamente os demais meses. Na conferência local, **MAIO2026!Q63** contém uma data inválida com plantões preenchidos e **SETEMBRO2026!R74** tem um nome sem associação segura. Esses dois meses históricos ficam preservados para conferência; não são considerados uma importação completa e não são inferidos dias ou identidades. Os outros dez meses puderam ser importados localmente; isso não comprova a atualização da Oracle.
 
-Trocas aceitas no aplicativo são preservadas enquanto a planilha mantém a atribuição antiga. Se a grade passar a refletir a mesma decisão, a leitura reconhece a atualização; uma terceira alteração conflitante preserva a decisão local e sinaliza a divergência. A escrita nas planilhas originais e a cobertura do pós-plantão continuam aguardando a integração apropriada.
+Trocas aceitas no aplicativo são preservadas enquanto a planilha mantém a atribuição antiga. Se a grade passar a refletir a mesma decisão, a leitura reconhece a atualização; uma terceira alteração conflitante preserva a decisão local e sinaliza a divergência. A escrita na planilha mensal e a cobertura do pós-plantão continuam aguardando a integração apropriada. O piloto de escrita disponível é somente para estágios semanais de 23–29/11/2026.
 
 Para aplicar na Oracle, siga [deploy/README.md](deploy/README.md). Atualizar o repositório e aplicar as migrações são passos de implantação; a importação deve ser conferida pelo resumo da fonte e pelo comando `sync_status` na própria instância.
 
@@ -156,3 +156,16 @@ A negociação se aplica somente às atividades que oferecem **Combinar divisão
 **Concordo e envio para o colega** registra o aceite de quem propõe e cria uma solicitação pendente. A tela identifica quem já concordou e de quem falta o aceite. Apenas o destinatário pode aceitar a divisão; só depois são criadas as duas atividades na escala final. Cada dia exige seu próprio acordo. Recusar ou cancelar mantém as atividades sem definição, e propostas pendentes não aparecem na exportação final do calendário.
 
 Validação desse fluxo: **350 testes passaram**, incluindo semanas sem cota, consentimento por dia, pendências fora do calendário final e proteção das atividades que não permitem divisão.
+
+
+## Teste de escrita em Sheets: 23–29/11/2026
+
+A migração **0018** acrescenta uma conexão OAuth Google e prévias administrativas. Em **Planilhas e fontes → Testar gravação no Google**, conecte sua conta pessoal de editor, selecione a fonte semanal já importada, faça uma troca com aceite do colega e prepare a prévia como administrador. Somente a confirmação da prévia grava na planilha; aceitar a troca no aplicativo continua sendo uma decisão local e não dispara uma gravação automática.
+
+O piloto aceita somente trocas regulares futuras, da mesma fonte e da semana de 23–29/11/2026, já aceitas pelos dois. Não inclui divisões da dupla, plantões mensais ou atividades que passaram por várias trocas. Datas, horários, setores, nomes e a conexão são conferidos de novo antes do envio. Uma única chamada Google altera os nomes das duas atividades; a formatação e os demais campos não são enviados. **Nomes são gravados como valores fixos no Espelho Semanal: fórmulas dessas células são substituídas**, com indicação e confirmação explícita na prévia. Abas de referência não são atualizadas.
+
+O refresh token é criptografado com chave separada do banco. Arquivos OAuth/chave não entram no Git nem na imagem e são montados somente no web; a conexão precisa ser feita por administrador. Código, client secret e tokens não são exibidos. O redator de logs e o complemento Nginx também cobrem a rota OAuth de retorno. A instalação e o roteiro real estão em [deploy/README.md](deploy/README.md#teste-de-escrita-na-semana-de-23-a-29112026).
+
+Após a gravação, a leitura diária reconhece os novos nomes sem duplicar os eventos aceitos ou mudar os UIDs do calendário. Falha de envio não desfaz uma troca aceita no aplicativo: o resultado é marcado para conferência e não é reenviado automaticamente. Prévias vencem em dez minutos e não podem ser reaplicadas. A conferência anterior e a escrita são duas operações Google distintas: Sheets não fornece comparação e gravação condicionais em uma só operação, portanto combine o teste sem edições simultâneas dessas células por terceiros.
+
+Validação do piloto: **373 testes passaram**; Chromium confirmou prévia sem escrita, confirmação explícita e resultado em tela móvel com Google simulado. OAuth real e escrita na Oracle ainda dependem dos arquivos e da autorização da conta de editor.

@@ -1,0 +1,10 @@
+services:
+  web:
+    secrets:
+      - google_sheets_oauth_client
+      - google_sheets_token_key
+secrets:
+  google_sheets_oauth_client:
+    file: ./google-sheets-oauth-client.json
+  google_sheets_token_key:
+    file: ./google-sheets-token-key.txt

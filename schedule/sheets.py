@@ -138,6 +138,19 @@ def sync_workbook(book, source):
     if not days:
         raise SheetFormatError('Datas não reconhecidas; nada foi alterado.')
     validate_weekly_input(book,rows,days)
+    from collections import defaultdict
+    accepted_slots=defaultdict(list)
+    accepted_source_ids=set()
+    for decision in Shift.objects.filter(source=source).filter(Q(offers__status='accepted')|Q(requests__status='accepted')).distinct():
+        accepted_source_ids.add(decision.pk)
+        if decision.active:
+            accepted_slots[(decision.source_cell,decision.starts_at,decision.ends_at,decision.sector)].append(decision)
+    former_owners=defaultdict(set)
+    for offered_id,requested_id,proposer_id,recipient_id in Exchange.objects.filter(status='accepted').filter(
+        Q(offered_id__in=accepted_source_ids)|Q(requested_id__in=accepted_source_ids)
+    ).values_list('offered_id','requested_id','proposer_id','recipient_id'):
+        former_owners[offered_id].add(proposer_id)
+        former_owners[requested_id].add(recipient_id)
     seen=[]; shared_seen=[]; incomplete_seen=[]; rest_count=0; occurrences={}; preserved=0
     for col,day in days:
         sector=''; location=''
@@ -190,9 +203,26 @@ def sync_workbook(book, source):
                 key=f'{day}|{start.isoformat()}|{end.isoformat()}|{user.username}|{label}'
                 occurrences[key]=occurrences.get(key,0)+1
                 ext=f'{source[:40]}:{digest(key+str(occurrences[key]))}'
+                acknowledged=accepted_slots.get((source_cell,start,end,label),[])
+                if len(acknowledged)>1:
+                    raise SheetFormatError('Há decisões duplicadas para a mesma atividade; confira a conciliação.')
+                decision=acknowledged[0] if acknowledged else None
+                if decision and user.pk!=decision.resident_id and user.pk in former_owners[decision.pk]:
+                    # A cached/old source may still contain a former owner,
+                    # including after a previous read acknowledged the swap.
+                    seen.append(decision.external_id)
+                    preserved+=1
+                    continue
                 seen.append(ext)
                 shift=Shift.objects.select_for_update().filter(external_id=ext).first()
-                if shift and Exchange.objects.filter(status='accepted').filter(Q(offered=shift)|Q(requested=shift)).exists():
+                if decision and user.pk==decision.resident_id:
+                    if shift and shift.pk!=decision.pk:
+                        raise SheetFormatError('Há identidades duplicadas para a atividade trocada; confira a conciliação.')
+                    shift=decision
+                    if shift.external_id!=ext:
+                        shift.external_id=ext
+                        shift.save(update_fields=['external_id'])
+                if shift and shift.pk in accepted_source_ids:
                     preserved+=1
                     continue
                 Shift.objects.update_or_create(external_id=ext,defaults={'source':source,'active':True,'source_cell':source_cell,'resident':user,'starts_at':start,'ends_at':end,'sector':label})

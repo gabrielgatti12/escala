@@ -102,7 +102,7 @@ O painel verifica novidades a cada 45 segundos e se atualiza quando o usuário n
 
 ## Atualização com leitura diária, avisos e assinatura de calendário
 
-As migrações 0011–0013 acrescentaram os avisos, a assinatura e o controle de leitura diária; a atualização atual inclui também a 0016, que registra a fonte mensal de plantões automaticamente. O código continua com leitura do Google; não grava trocas nas planilhas originais. O banco local mantém as decisões aceitas. A escrita depende de permissão de editor e de uma credencial autorizada para escrita, ainda não configuradas.
+As migrações 0011–0013 acrescentaram os avisos, a assinatura e o controle de leitura diária; a atualização atual inclui também a 0016, que registra a fonte mensal de plantões automaticamente. A sincronização diária continua somente leitura. O banco local mantém as decisões aceitas; a gravação disponível é o piloto manual de 23–29/11/2026 descrito abaixo, que depende de configuração OAuth e acesso de editor.
 
 ```bash
 cd /opt/escala-app &&
@@ -166,3 +166,54 @@ bash scripts/oracle-compose.sh logs --timestamps --tail=60 sync
 `sync_status` consulta somente o banco local e informa contato, progresso, falhas e próxima tentativa; um contato recente não prova que todas as fontes foram importadas sem erro. Consulte também o resumo e os avisos do cartão mensal. Na conferência local, MAIO2026!Q63 tem uma data inválida com plantões preenchidos e SETEMBRO2026!R74 tem um nome sem associação segura. Esses dois meses históricos ficam preservados para conferência; os outros dez meses foram importados localmente. Não se trata de sucesso integral dos doze meses, e essa conferência não comprova a importação na Oracle. Trocas aceitas e IDs das cinderelas já existentes são preservados.
 
 A opção restrita **Cinderelas 18–24** permanece disponível para outras fontes. A planilha acima usa **Plantões completos** automaticamente; não a recadastre nem altere o formato de uma fonte semanal para reutilizá-la. Nenhuma dessas leituras grava nas planilhas originais. Os passos acima ainda precisam ser executados e verificados na Oracle; este documento não confirma uma implantação remota.
+
+## Teste de escrita na semana de 23 a 29/11/2026
+
+Este piloto não envia nada ao Google automaticamente. A autorização é com uma **conta pessoal Google que tem acesso de editor**, conectada pelo administrador do aplicativo. O login por e-mail do aplicativo e a chave da Drive API não são essa autorização.
+
+1. No projeto Google Cloud já usado para as APIs, habilite **Google Sheets API** em APIs e serviços → Biblioteca.
+2. Abra **Google Auth Platform** (ou Tela de permissão OAuth). Configure nome do aplicativo, e-mail de suporte e contato. Em **Público-alvo/Audience**, escolha Externo, mantenha o modo de teste e adicione como usuário de teste o e-mail Google que recebeu acesso de editor. Em Acesso a dados/Data Access, adicione os escopos `https://www.googleapis.com/auth/spreadsheets` e `https://www.googleapis.com/auth/userinfo.email`.
+3. Em **Clientes/Clients**, crie um cliente OAuth do tipo **Aplicativo da Web**. Cadastre exatamente este **URI de redirecionamento autorizado**:
+
+```text
+https://escala.164.152.245.74.sslip.io/google/planilhas/retorno/
+```
+
+4. Baixe o JSON desse cliente. Transfira o arquivo para a Oracle pelo computador em que já funciona o SSH. Exemplo no PowerShell, ajustando somente o caminho do arquivo baixado:
+
+```powershell
+scp "C:\Users\SEU_USUARIO\Downloads\cliente-oauth.json" ubuntu@164.152.245.74:/home/ubuntu/google-sheets-oauth-client.json
+```
+
+5. Na Oracle, atualize e instale os arquivos privados. O instalador cria a chave de criptografia se ainda não existir; em novas execuções preserva a chave. Não compartilhe o conteúdo desses arquivos. Depois de conferir a instalação, guarde a cópia baixada no armazenamento privado usado pelo operador.
+
+```bash
+cd /opt/escala-app &&
+git pull --ff-only origin codex/escala-inicial &&
+sudo bash scripts/configure-google-editor.sh /home/ubuntu/google-sheets-oauth-client.json &&
+bash scripts/oracle-compose.sh build &&
+bash scripts/oracle-compose.sh stop web sync &&
+bash scripts/oracle-compose.sh run --rm web python manage.py migrate --noinput &&
+bash scripts/oracle-compose.sh up -d
+```
+
+O wrapper detecta `deploy/google-sheets-oauth-client.json` e `deploy/google-sheets-token-key.txt` e adiciona `compose.sheets-editor.yaml` automaticamente. Esses arquivos têm proprietário root, grupo 10001 e modo 640; apenas o serviço web recebe os secrets. O sincronizador mantém as credenciais anteriores de leitura. Para configurar outro domínio, use o URI mostrado na página de teste e inclua-o no cliente OAuth; não há redirecionamento arbitrário enviado pelo navegador.
+
+6. Antes da primeira conexão Google, confirme que o bloco HTTPS do Nginx inclui `/opt/escala-app/deploy/nginx-private-calendars.conf`. Se já incluía esse arquivo, a atualização acrescenta a rota OAuth à proteção de logs. Valide e recarregue:
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Se ainda não havia o include, acrescente-o ao bloco HTTPS existente conforme a seção da assinatura privada. Não duplique o include e não substitua a configuração do certificado. Gunicorn também oculta os códigos de autorização e queries da rota de retorno.
+
+7. Entre com a **conta administrativa do aplicativo** e abra **Planilhas e fontes → Testar gravação no Google**, ou `/google/planilhas/`. Clique **Conectar minha conta Google**, selecione o e-mail pessoal de editor e autorize as permissões. Confira o e-mail exibido ao retornar. Use o mesmo administrador que autorizou a conexão para preparar e gravar as prévias. Em modo de teste, o Google pode apresentar a identificação de aplicativo ainda não verificado; confira que é o seu projeto. Conexões externas de teste podem expirar em sete dias e exigir nova conexão.
+8. Selecione na lista a fonte de **23–29/11/2026** que recebeu permissão de editor. A lista vem do banco já sincronizado: não exige colar URL. Se estiver vazia, use Atualizar agora e confira a importação dessa semana. Habilitar o teste apenas delimita a fonte; não grava nomes.
+9. Com a conta pessoal de residente no aplicativo, proponha uma troca de duas atividades futuras dessa mesma semana/fonte. O outro residente entra em **Solicitações → Recebidas** e aceita. Depois disso, os calendários do aplicativo já refletem a decisão, enquanto a planilha permanece como estava.
+10. Volte ao aplicativo como administrador. Na tela de teste, clique **Preparar prévia** nessa troca. Confira atividade, data, nomes antes/depois e células. Para o piloto, os nomes são escritos diretamente no **Espelho Semanal como valores fixos**; eventuais fórmulas nessas células são substituídas. Não alteramos Dados, R1/C1a ou outras abas de referência. Marque a confirmação e clique **Conferir novamente e gravar esta troca**. Confira o resultado da página e as duas células no Google.
+
+O piloto só aceita trocas com consentimento de ambos, mesma fonte semanal, categoria regular, período 23–29/11/2026 e atividades futuras sem conciliação. Trocas entre arquivos, plantões mensais, divisões de duplas, nomes ambíguos e atividades com várias trocas aceitas são recusadas neste teste inicial. Use uma troca combinada com o colega e evite edições simultâneas nas células durante a conferência. A API Sheets aplica as mudanças enviadas em um único lote, mas a leitura de conferência e a escrita não são uma comparação e gravação atômicas; não há promessa de exclusão contra editores externos.
+
+A prévia dura dez minutos e só pode ser enviada uma vez. Se houver timeout, o status fica Resultado a conferir; prepare outra prévia após conferir a origem. Se o Google já tiver aplicado os dois nomes, a nova prévia apenas reconhece o resultado, sem repetir a gravação. Envio que ficou marcado como Em andamento após interrupção do processo exige aguardar dez minutos e preparar uma nova conferência; a aplicação não reenvia automaticamente. Uma divergência parcial ou nome diferente bloqueia a gravação. Desconectar remove o token local e desativa o teste; a autorização também pode ser revogada na segurança da própria conta Google.
+
+Guarde a chave de criptografia junto aos backups privados: perder ou trocar a chave exige reconectar o Google. O token fica criptografado no banco, mas cópias do banco continuam sendo dados privados. A migração 0018 e os testes locais não comprovam OAuth real, acesso de editor ou implantação na Oracle; essas etapas dependem da configuração acima.

@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-heading"><div><h1>Conferir troca #{{ preview.exchange_id }}</h1><p>{{ preview.source }} · {{ preview.get_state_display }}</p></div><a class="button secondary" href="{% url 'sheets_write_pilot' %}">Voltar ao teste</a></div>
+<section class="panel sheets-editor-panel"><p>Conta Google: <strong>{{ preview.plan.email }}</strong></p>
+{% for item in preview.plan.summary %}<article class="request-row"><div><strong>{{ item.date }} · {{ item.sector }}</strong><p>Na planilha: {{ item.before }}<br>Após gravar: <strong>{{ item.after }}</strong></p></div></article>{% endfor %}
+<p>Células do Espelho Semanal: {% for cell in preview.plan.cells %}{{ cell.address }}{% if not forloop.last %}, {% endif %}{% endfor %}.</p>
+{% if preview.plan.already_applied %}<p class="notice">A planilha já reflete esta troca. A confirmação apenas registra a conferência, sem repetir a gravação.</p>{% endif %}
+{% if preview.message %}<p class="notice">{{ preview.message }}</p>{% endif %}
+{% if preview.state == 'preview' %}<p>O teste grava os nomes diretamente no Espelho Semanal, como valores fixos. Se essas células usam fórmulas, elas serão substituídas pelos nomes mostrados. As abas de referência não são alteradas.</p>
+<p>A prévia vence em 10 minutos. Os nomes, datas, horários e setores serão lidos novamente antes do envio; divergências interrompem a gravação.</p>
+<form method="post" action="{% url 'sheets_write_apply' preview.pk %}">{% csrf_token %}<label class="checkbox"><input type="checkbox" name="confirm" value="yes" required>Conferi os dois nomes e concordo em gravar valores fixos somente nas células indicadas.</label><button class="button primary">Conferir novamente e gravar esta troca</button></form>
+{% elif preview.state == 'unknown' %}<p>O envio pode ter chegado ao Google. Confira a fonte ou prepare uma nova prévia antes de tentar outra gravação.</p>{% endif %}
+<a class="text-link" href="https://docs.google.com/spreadsheets/d/{{ preview.source.spreadsheet_id }}/edit" target="_blank" rel="noopener noreferrer">Abrir planilha</a></section>
+{% endblock %}

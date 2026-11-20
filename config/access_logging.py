@@ -7,6 +7,7 @@ from gunicorn.glogging import Logger
 
 REDACTED = '[redacted]'
 _FEED_PATH = re.compile(r'(/calendario/assinatura/)[^/?#\s]+(/?)(\?[^\s#]*)?')
+_OAUTH_CALLBACK = re.compile(r'(/google/planilhas/retorno/)(?:\?[^\s#]*)?')
 _ACTIVATION_PATH = re.compile(r'(/ativar/)[^/?#\s]+/[^/?#\s]+(/?)(\?[^\s#]*)?')
 
 
@@ -17,6 +18,7 @@ def _encoded_path_pattern(path):
 
 
 _ENCODED_FEED = re.compile(_encoded_path_pattern('/calendario/assinatura/') + r'[^\s#]+', re.I)
+_ENCODED_OAUTH = re.compile(_encoded_path_pattern('/google/planilhas/retorno/') + r'[^\s#]*', re.I)
 _ENCODED_ACTIVATION = re.compile(_encoded_path_pattern('/ativar/') + r'[^\s#]+', re.I)
 
 
@@ -24,6 +26,8 @@ def redact_sensitive_text(value):
     """Redact private paths wherever a log atom contains them, including headers."""
     if not isinstance(value, str):
         return value
+    value = _ENCODED_OAUTH.sub(f'/google/planilhas/retorno/?{REDACTED}', value)
+    value = _OAUTH_CALLBACK.sub(f'/google/planilhas/retorno/?{REDACTED}', value)
     value = _ENCODED_FEED.sub(f'/calendario/assinatura/{REDACTED}/', value)
     value = _ENCODED_ACTIVATION.sub(f'/ativar/{REDACTED}/{REDACTED}/', value)
     value = _FEED_PATH.sub(
@@ -43,7 +47,9 @@ class SafeAccessLogger(Logger):
         safe_environ = {key: redact_sensitive_text(value) for key, value in environ.items()}
         path = unquote(environ.get('PATH_INFO') or urlsplit(environ.get('RAW_URI', '')).path)
         safe_path = None
-        if path.startswith('/calendario/assinatura/'):
+        if path.startswith('/google/planilhas/retorno/'):
+            safe_path = '/google/planilhas/retorno/'
+        elif path.startswith('/calendario/assinatura/'):
             safe_path = f'/calendario/assinatura/{REDACTED}/'
         elif path.startswith('/ativar/'):
             safe_path = f'/ativar/{REDACTED}/{REDACTED}/'

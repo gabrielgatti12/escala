@@ -1,8 +1,18 @@
+from schedule import google_editor, sheets_write_views
 from django.contrib import admin
 from django.urls import path, include
 from schedule import views, calendar_feeds, notifications, source_actions, exchange_choices
 from django.views.generic import TemplateView
 urlpatterns = [
+    path('google/planilhas/',sheets_write_views.pilot,name='sheets_write_pilot'),
+    path('google/planilhas/configurar/',sheets_write_views.configure,name='sheets_write_configure'),
+    path('google/planilhas/conectar/',google_editor.connect,name='google_editor_connect'),
+    path('google/planilhas/retorno/',google_editor.callback,name='google_editor_callback'),
+    path('google/planilhas/desconectar/',google_editor.disconnect,name='google_editor_disconnect'),
+    path('google/planilhas/trocas/<int:pk>/previa/',sheets_write_views.preview,name='sheets_write_preview'),
+    path('google/planilhas/previas/<int:pk>/',sheets_write_views.review,name='sheets_write_review'),
+    path('google/planilhas/previas/<int:pk>/gravar/',sheets_write_views.apply,name='sheets_write_apply'),
+
     path('fontes/atualizar/',source_actions.request_source_refresh,name='request_source_refresh'),
     path('calendario/conectar/',calendar_feeds.connections,name='calendar_connections'),
     path('calendario/conectar/gerar/',calendar_feeds.rotate,name='calendar_feed_create'),
